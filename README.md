@@ -1,0 +1,31 @@
+<div align="center">
+  <img src="assets/yattee-logo.png" width="128" height="128" alt="Yattee logo" />
+  <h1>Yattee</h1>
+  <p>Privacy oriented video player for iOS, tvOS and macOS<br /></p>
+
+[![AGPL v3](https://shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0.en.html)
+[![GitHub issues](https://img.shields.io/github/issues/alzimerahmed/StreamSnip)](https://github.com/alzimerahmed/StreamSnip/issues)
+[![GitHub pull requests](https://img.shields.io/github/issues-pr/alzimerahmed/StreamSnip)](https://github.com/alzimerahmed/StreamSnip/pulls)
+
+
+[![Discord](https://invidget.switchblade.xyz/pSnNKhZHEG)](https://yattee.stream/discord)
+</div>
+
+> **Yattee 2 is in the works!** A new version of the app is being built with a refreshed experience.
+> It pairs with the new [Yattee Server](https://github.com/yattee/yattee-server) — a self-hosted backend powered by yt-dlp that supports 1000+ sites.
+> Join the [TestFlight beta](https://yattee.stream/beta2) to try early builds, and check the new documentation site at [docs.yattee.stream](https://docs.yattee.stream) for guides, roadmap and changelog.
+
+## Features
+* Native user interface built with [SwiftUI](https://developer.apple.com/swiftui/) with customization settings
+* Player queue and history
+* Player component with custom controls, gestures and support for 4K playback
+* Fullscreen, Picture in Picture and background audio playback
+* [SponsorBlock](https://sponsor.ajay.app/), configurable categories to skip
+* [Automation](https://docs.yattee.stream/docs/app/automation) with the `yattee://` URL scheme, x-callback-url, Shortcuts and Siri
+
+## Fork
+
+StreamSnip is a fork of [Yattee](https://github.com/yattee/yattee) (main@03599d3), licensed under AGPL-3.0. All credit for the original project goes to the Yattee authors and contributors.
+
+## License
+Yattee and its components is shared on [AGPL v3](https://www.gnu.org/licenses/agpl-3.0.en.html) license.

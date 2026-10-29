@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build & Test (macOS)
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode (latest stable)
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Resolve package dependencies
+        run: xcodebuild -resolvePackageDependencies
+
+      - name: Build for testing
+        run: >
+          xcodebuild -project Yattee.xcodeproj
+          -scheme Yattee
+          -configuration Debug
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_REQUIRED=NO
+          build-for-testing
+
+      - name: Run unit tests
+        run: >
+          xcodebuild test-without-building
+          -scheme Yattee
+          -destination 'platform=macOS'
+          -only-testing:YatteeTests
+          CODE_SIGNING_ALLOWED=NO
