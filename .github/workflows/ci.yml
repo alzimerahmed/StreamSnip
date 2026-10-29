@@ -48,8 +48,41 @@ jobs:
           -scheme StreamSnip
           -destination 'platform=macOS'
           -only-testing:StreamSnipTests
+          -resultBundlePath TestResults.xcresult
           ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon
           CODE_SIGNING_ALLOWED=NO
+        continue-on-error: true
+
+      - name: Collect test diagnostics
+        if: always()
+        run: |
+          mkdir -p diagnostics
+          cp -R TestResults.xcresult diagnostics/ 2>/dev/null || true
+          cp -R ~/Library/Logs/DiagnosticReports diagnostics/crash-logs 2>/dev/null || true
+          xcrun xcresulttool get test-results summary --path TestResults.xcresult > diagnostics/summary.json 2>/dev/null || true
+
+      - name: Upload test diagnostics
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-diagnostics
+          path: diagnostics
+          retention-days: 7
+
+      - name: Enforce test result
+        if: always()
+        run: |
+          if [ ! -f diagnostics/summary.json ]; then
+            echo "No result bundle — test run crashed before reporting"
+            exit 1
+          fi
+          python3 - <<'EOF'
+          import json, sys
+          summary = json.load(open("diagnostics/summary.json"))
+          result = summary.get("result")
+          print("Test result:", result)
+          sys.exit(0 if result == "Passed" else 1)
+          EOF
 
   build-tvos:
     name: Build (tvOS)
