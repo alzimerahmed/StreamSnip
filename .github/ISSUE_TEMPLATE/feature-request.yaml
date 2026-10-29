@@ -6,14 +6,14 @@ body:
     attributes:
       value: |
         **Before You Submit Your Issue**
-        - This is not a right place to ask questions. Use [Discussions](https://github.com/yattee/yattee/discussions) or contact directly via [Discord](https://yattee.stream/discord) or [Matrix Channel](https://matrix.to/#/#Yattee:matrix.org)
+        - This is not a right place to ask questions. Use [Discussions](https://github.com/alzimerahmed/StreamSnip/discussions) instead.
 
   - type: checkboxes
     attributes:
       label: Guidelines
       description: Please ensure you've completed the following
       options:
-        - label: I have searched the [issue tracker](https://github.com/yattee/yattee/issues) and I haven't found feature request like this
+        - label: I have searched the [issue tracker](https://github.com/alzimerahmed/StreamSnip/issues) and I haven't found feature request like this
           required: true
 
   - type: dropdown

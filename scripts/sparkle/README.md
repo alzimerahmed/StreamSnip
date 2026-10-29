@@ -54,7 +54,7 @@ The `release_channel` workflow input (`beta` | `stable`, default `beta`) control
   --sign-update-bin ~/Library/Developer/Xcode/DerivedData/Yattee-*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update \
   --ed-key-file /tmp/sparkle_ed_private.key \
   --appcast appcast.xml \
-  --repo yattee/yattee
+  --repo alzimerahmed/StreamSnip
 ```
 
 ## Verification

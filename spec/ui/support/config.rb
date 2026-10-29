@@ -62,14 +62,14 @@ module UITest
         'stream.yattee.app'
       end
 
-      # Yattee Server URL for testing (configurable via env)
+      # Yattee Server URL for testing (configurable via env; no default — set your own instance)
       def yattee_server_url
-        ENV.fetch('YATTEE_SERVER_URL', 'https://yp.home.arekf.net')
+        ENV.fetch('YATTEE_SERVER_URL', nil)
       end
 
       # Extract host from Yattee Server URL for identifier matching
       def yattee_server_host
-        URI.parse(yattee_server_url).host
+        URI.parse(yattee_server_url).host if yattee_server_url
       end
 
       # Yattee Server username for testing (configurable via env)
@@ -87,14 +87,14 @@ module UITest
         yattee_server_username && yattee_server_password
       end
 
-      # Invidious URL for testing (configurable via env)
+      # Invidious URL for testing (configurable via env; no default — set your own instance)
       def invidious_url
-        ENV.fetch('INVIDIOUS_URL', 'https://invidious.home.arekf.net')
+        ENV.fetch('INVIDIOUS_URL', nil)
       end
 
       # Extract host from Invidious URL for identifier matching
       def invidious_host
-        URI.parse(invidious_url).host
+        URI.parse(invidious_url).host if invidious_url
       end
 
       # Invidious account email for testing (configurable via env)
@@ -112,14 +112,14 @@ module UITest
         invidious_email && invidious_password
       end
 
-      # Invidious URL for an instance fronted by HTTP Basic Auth (configurable via env)
+      # Invidious URL for an instance fronted by HTTP Basic Auth (configurable via env; no default)
       def invidious_basic_auth_url
-        ENV.fetch('INVIDIOUS_BASIC_AUTH_URL', 'https://i03.s.yattee.stream')
+        ENV.fetch('INVIDIOUS_BASIC_AUTH_URL', nil)
       end
 
       # Extract host from the basic-auth Invidious URL
       def invidious_basic_auth_host
-        URI.parse(invidious_basic_auth_url).host
+        URI.parse(invidious_basic_auth_url).host if invidious_basic_auth_url
       end
 
       # HTTP Basic Auth username for the proxy in front of the Invidious instance
@@ -152,14 +152,14 @@ module UITest
         invidious_proxied_email && invidious_proxied_password
       end
 
-      # Piped URL for testing (configurable via env)
+      # Piped URL for testing (configurable via env; no default — set your own instance)
       def piped_url
-        ENV.fetch('PIPED_URL', 'https://pipedapi.home.arekf.net')
+        ENV.fetch('PIPED_URL', nil)
       end
 
       # Extract host from Piped URL for identifier matching
       def piped_host
-        URI.parse(piped_url).host
+        URI.parse(piped_url).host if piped_url
       end
 
       # Piped account username for testing (configurable via env)

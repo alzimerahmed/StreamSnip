@@ -15,8 +15,7 @@ struct AboutView: View {
         SettingsFormContainer {
             #if !os(tvOS)
             SettingsFormSection("settings.about.community") {
-                communityLink("GitHub", icon: "github", url: "https://github.com/yattee/yattee")
-                communityLink("Discord", icon: "discord", url: "https://yattee.stream/discord")
+                communityLink("GitHub", icon: "github", url: "https://github.com/alzimerahmed/StreamSnip")
             }
             #endif
 

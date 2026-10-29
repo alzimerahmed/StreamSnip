@@ -5,9 +5,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for taking the time to report a bug! Please read the [Reporting Issues](https://docs.yattee.stream/docs/guides/reporting-issues) guide first. Reports with logs and clear steps to reproduce get fixed much faster.
+        Thanks for taking the time to report a bug! Please read the [Reporting Issues](https://github.com/alzimerahmed/StreamSnip/issues) guide first. Reports with logs and clear steps to reproduce get fixed much faster.
 
-        - Questions go to [Discussions](https://github.com/yattee/yattee/discussions), [Discord](https://yattee.stream/discord) or [Matrix](https://matrix.to/#/#Yattee:matrix.org).
+        - Questions go to [Discussions](https://github.com/alzimerahmed/StreamSnip/discussions).
         - Problems with Yattee Server go to [yattee/yattee-server](https://github.com/yattee/yattee-server/issues).
         - Please report one issue per report.
 
@@ -16,7 +16,7 @@ body:
       label: Guidelines
       description: Please make sure you've done the following
       options:
-        - label: I have searched the [issue tracker](https://github.com/yattee/yattee/issues) and haven't found a report of this bug
+        - label: I have searched the [issue tracker](https://github.com/alzimerahmed/StreamSnip/issues) and haven't found a report of this bug
           required: true
         - label: I can reproduce this bug on the latest version of the app
           required: true
