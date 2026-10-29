@@ -344,7 +344,7 @@ actor JellyfinAPI: InstanceAPI {
 
 // MARK: - Request/Response Models
 
-struct JellyfinAuthRequest: Encodable, Sendable {
+struct JellyfinAuthRequest: Codable, Sendable {
     let username: String
     let pw: String
 }
