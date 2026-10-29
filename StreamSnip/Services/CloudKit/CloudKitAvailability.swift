@@ -6,6 +6,9 @@
 //
 
 import Foundation
+#if os(macOS)
+import Security
+#endif
 
 /// Sideloaded installs (AltStore, SideStore, Sideloadly, …) are re-signed by a
 /// team that cannot register `iCloud.com.alzimerahmed.StreamSnip` (container IDs are
@@ -16,15 +19,39 @@ enum CloudKitAvailability {
     /// Whether CloudKit APIs may be used in this installation.
     ///
     /// Determined by parsing the embedded provisioning profile. Builds without
-    /// an embedded profile (App Store, TestFlight, simulator) always carry the
-    /// correct entitlements and are treated as available.
+    /// an embedded profile fall back to the running binary's actual code-signing
+    /// entitlements on macOS (unsigned CI/sideload builds have none, and
+    /// `CKContainer(identifier:)` traps there); on iOS a missing profile means
+    /// App Store, TestFlight or simulator, which always carry the entitlement.
     static let isAvailable: Bool = {
-        guard let entitlements = embeddedProvisioningEntitlements() else {
-            return true
+        if let entitlements = embeddedProvisioningEntitlements() {
+            let containers = entitlements["com.apple.developer.icloud-container-identifiers"] as? [String] ?? []
+            return containers.contains(AppIdentifiers.iCloudContainer)
         }
-        let containers = entitlements["com.apple.developer.icloud-container-identifiers"] as? [String] ?? []
+        #if os(macOS)
+        guard let containers = secTaskEntitlementContainers() else {
+            return false
+        }
         return containers.contains(AppIdentifiers.iCloudContainer)
+        #else
+        return true
+        #endif
     }()
+
+    #if os(macOS)
+    /// The iCloud container identifiers the running binary is signed with, or
+    /// nil when the entitlement is absent (unsigned builds).
+    private static func secTaskEntitlementContainers() -> [String]? {
+        guard let task = SecTaskCreateFromSelf(nil),
+              let value = SecTaskCopyValueForEntitlement(
+                  task,
+                  "com.apple.developer.icloud-container-identifiers" as CFString,
+                  nil
+              )
+        else { return nil }
+        return (value as? [Any])?.compactMap { $0 as? String }
+    }
+    #endif
 
     /// Extracts the entitlements dictionary from the embedded provisioning
     /// profile — a CMS blob wrapping an XML property list.
