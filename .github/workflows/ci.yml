@@ -60,7 +60,7 @@ jobs:
           xcodebuild -project StreamSnip.xcodeproj
           -scheme StreamSnip
           -configuration Debug
-          -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)'
+          -destination 'generic/platform=tvOS Simulator'
           CODE_SIGNING_ALLOWED=NO
           CODE_SIGNING_REQUIRED=NO
           build
