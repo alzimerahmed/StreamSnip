@@ -203,69 +203,12 @@ struct ClipEditSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(String(localized: "clips.edit.details", defaultValue: "Clip")) {
-                    TextField(String(localized: "clips.edit.title", defaultValue: "Title"), text: $title)
-                    TextField(String(localized: "clips.edit.note", defaultValue: "Note"), text: $note, axis: .vertical)
-                }
-                Section(String(localized: "clips.edit.range", defaultValue: "Range (seconds)")) {
-                    TextField(String(localized: "clips.edit.in", defaultValue: "In"), text: $startText)
-                    #if os(iOS)
-                        .keyboardType(.decimalPad)
-                    #endif
-                    TextField(String(localized: "clips.edit.out", defaultValue: "Out"), text: $endText)
-                    #if os(iOS)
-                        .keyboardType(.decimalPad)
-                    #endif
-                }
-                Section(String(localized: "clips.edit.collections", defaultValue: "Collections")) {
-                    ForEach(collections, id: \.id) { collection in
-                        let isMember = (clip.collections ?? []).contains { $0.id == collection.id }
-                        Button {
-                            toggleMembership(collection)
-                        } label: {
-                            Label(collection.name, systemImage: isMember ? "checkmark.circle.fill" : "circle")
-                        }
-                    }
-                }
-                Section(String(localized: "clips.edit.share", defaultValue: "Share")) {
-                    if let link = ClipShare.videoTimestampLink(for: clip) {
-                        ShareLink(item: link) {
-                            Label(String(localized: "clips.share.timestampLink", defaultValue: "Share Timestamp Link"), systemImage: "link")
-                        }
-                        Button {
-                            #if os(iOS)
-                            UIPasteboard.general.string = link.absoluteString
-                            #elseif os(macOS)
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(link.absoluteString, forType: .string)
-                            #endif
-                            appEnvironment?.toastManager.showSuccess(
-                                String(localized: "clips.share.copied", defaultValue: "Link Copied")
-                            )
-                        } label: {
-                            Label(String(localized: "clips.share.copyLink", defaultValue: "Copy Timestamp Link"), systemImage: "doc.on.doc")
-                        }
-                    }
-                    ShareLink(item: ClipShare.shareText(for: clip)) {
-                        Label(String(localized: "clips.share.text", defaultValue: "Share as Text"), systemImage: "text.quote")
-                    }
-                }
+                detailsSection
+                rangeSection
+                collectionsSection
+                shareSection
                 #if !os(tvOS)
-                Section(String(localized: "clips.edit.export", defaultValue: "Export")) {
-                    Button {
-                        guard let appEnvironment else { return }
-                        isExportingSegment = true
-                        Task {
-                            await appEnvironment.clipSegmentDownloader.download(clip: clip, appEnvironment: appEnvironment)
-                            isExportingSegment = false
-                        }
-                    } label: {
-                        Label(String(localized: "clips.export.segment", defaultValue: "Download Segment (Beta)"), systemImage: "arrow.down.circle")
-                    }
-                    .disabled(isExportingSegment)
-                } footer: {
-                    Text(String(localized: "clips.export.segment.footer", defaultValue: "Exports the clip's range from a direct video file. Adaptive streams (HLS/DASH) and sources without partial-download support can't be exported."))
-                }
+                exportSection
                 #endif
             }
             .navigationTitle(String(localized: "clips.edit.title.navigation", defaultValue: "Edit Clip"))
@@ -284,6 +227,89 @@ struct ClipEditSheet: View {
             startText = String(Int(clip.startSeconds))
             endText = String(Int(clip.endSeconds))
         }
+    }
+
+    private var detailsSection: some View {
+        Section(String(localized: "clips.edit.details", defaultValue: "Clip")) {
+            TextField(String(localized: "clips.edit.title", defaultValue: "Title"), text: $title)
+            TextField(String(localized: "clips.edit.note", defaultValue: "Note"), text: $note, axis: .vertical)
+        }
+    }
+
+    private var rangeSection: some View {
+        Section(String(localized: "clips.edit.range", defaultValue: "Range (seconds)")) {
+            TextField(String(localized: "clips.edit.in", defaultValue: "In"), text: $startText)
+            #if os(iOS)
+                .keyboardType(.decimalPad)
+            #endif
+            TextField(String(localized: "clips.edit.out", defaultValue: "Out"), text: $endText)
+            #if os(iOS)
+                .keyboardType(.decimalPad)
+            #endif
+        }
+    }
+
+    private var collectionsSection: some View {
+        Section(String(localized: "clips.edit.collections", defaultValue: "Collections")) {
+            ForEach(collections, id: \.id) { collection in
+                let isMember = (clip.collections ?? []).contains { $0.id == collection.id }
+                Button {
+                    toggleMembership(collection)
+                } label: {
+                    Label(collection.name, systemImage: isMember ? "checkmark.circle.fill" : "circle")
+                }
+            }
+        }
+    }
+
+    private var shareSection: some View {
+        Section(String(localized: "clips.edit.share", defaultValue: "Share")) {
+            if let link = ClipShare.videoTimestampLink(for: clip) {
+                ShareLink(item: link) {
+                    Label(String(localized: "clips.share.timestampLink", defaultValue: "Share Timestamp Link"), systemImage: "link")
+                }
+                Button {
+                    copyTimestampLink(link)
+                } label: {
+                    Label(String(localized: "clips.share.copyLink", defaultValue: "Copy Timestamp Link"), systemImage: "doc.on.doc")
+                }
+            }
+            ShareLink(item: ClipShare.shareText(for: clip)) {
+                Label(String(localized: "clips.share.text", defaultValue: "Share as Text"), systemImage: "text.quote")
+            }
+        }
+    }
+
+    #if !os(tvOS)
+    private var exportSection: some View {
+        Section(String(localized: "clips.edit.export", defaultValue: "Export")) {
+            Button {
+                guard let appEnvironment else { return }
+                isExportingSegment = true
+                Task {
+                    await appEnvironment.clipSegmentDownloader.download(clip: clip, appEnvironment: appEnvironment)
+                    isExportingSegment = false
+                }
+            } label: {
+                Label(String(localized: "clips.export.segment", defaultValue: "Download Segment (Beta)"), systemImage: "arrow.down.circle")
+            }
+            .disabled(isExportingSegment)
+        } footer: {
+            Text(String(localized: "clips.export.segment.footer", defaultValue: "Exports the clip's range from a direct video file. Adaptive streams (HLS/DASH) and sources without partial-download support can't be exported."))
+        }
+    }
+    #endif
+
+    private func copyTimestampLink(_ link: URL) {
+        #if os(iOS)
+        UIPasteboard.general.string = link.absoluteString
+        #elseif os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(link.absoluteString, forType: .string)
+        #endif
+        appEnvironment?.toastManager.showSuccess(
+            String(localized: "clips.share.copied", defaultValue: "Link Copied")
+        )
     }
 
     private func save() {
