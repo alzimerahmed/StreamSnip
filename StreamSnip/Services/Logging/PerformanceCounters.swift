@@ -43,9 +43,9 @@ enum PerfCounter {
 
     /// Returns the counts accumulated since the last call and resets them.
     static func take() -> [String: Int] {
-        counts.withLock {
-            defer { $0 = [:] }
-            return $0
+        counts.withLock { dictionary in
+            defer { dictionary = [:] }
+            return dictionary
         }
     }
 }
