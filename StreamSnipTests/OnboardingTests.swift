@@ -41,7 +41,6 @@ struct OnboardingTests {
     }
 
     @Test("Adding a source lands on the final step with source copy")
-    @Test("Add-source path")
     func addSourcePath() {
         let model = OnboardingModel()
         #expect(model.step == .welcome)
