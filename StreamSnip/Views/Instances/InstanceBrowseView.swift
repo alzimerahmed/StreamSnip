@@ -469,7 +469,19 @@ struct InstanceBrowseView: View {
     /// button and the principal picker.
     @ToolbarContentBuilder
     private var browseToolbarContent: some ToolbarContent {
-        // Instance menu first so it is the leftmost navigation item on macOS.
+        instanceMenuToolbarItem
+        #if os(macOS)
+        if #available(macOS 26, *) {
+            modernToolbarItems
+        } else {
+            legacyToolbarItems
+        }
+        #endif
+    }
+
+    /// Instance menu first so it is the leftmost navigation item on macOS.
+    @ToolbarContentBuilder
+    private var instanceMenuToolbarItem: some ToolbarContent {
         ToolbarItem(placement: viewOptionsPlacement) {
             Menu {
                 instanceMenuContent
@@ -483,29 +495,40 @@ struct InstanceBrowseView: View {
             }
             #endif
         }
-        #if os(macOS)
-        if #available(macOS 26, *) {
-            // Render the items bare (conditional `if`, no opacity/disabled
-            // wrappers): wrapping a `.segmented` Picker inserts a hosting layer
-            // that makes the toolbar fall back to a Liquid-Glass pill instead of
-            // the native segmented control. The search filters button shows only
-            // while displaying search results; the principal picker swaps between
-            // the browse tab picker and the search content type picker.
-            if showsSearchFiltersInToolbar {
-                ToolbarItem(placement: .navigation) {
-                    searchFiltersToolbarButton
+    }
+
+    #if os(macOS)
+    // Render the items bare (conditional `if`, no opacity/disabled
+    // wrappers): wrapping a `.segmented` Picker inserts a hosting layer
+    // that makes the toolbar fall back to a Liquid-Glass pill instead of
+    // the native segmented control. The search filters button shows only
+    // while displaying search results; the principal picker swaps between
+    // the browse tab picker and the search content type picker.
+    @available(macOS 26, *)
+    @ToolbarContentBuilder
+    private var modernToolbarItems: some ToolbarContent {
+        if showsSearchFiltersInToolbar {
+            ToolbarItem(placement: .navigation) {
+                searchFiltersToolbarButton
+            }
+        }
+        if isToolbarPickerVisible {
+            ToolbarItem(placement: .principal) {
+                if showsSearchFiltersInToolbar {
+                    searchContentTypePicker
+                } else {
+                    tabPicker
                 }
             }
-            if isToolbarPickerVisible {
-                ToolbarItem(placement: .principal) {
-                    if showsSearchFiltersInToolbar {
-                        searchContentTypePicker
-                    } else {
-                        tabPicker
-                    }
-                }
-            }
-        } else if showsSearchFiltersInToolbar {
+        }
+        // Pin the trailing group (search field) to the right edge,
+        // matching the global Search view.
+        ToolbarSpacer(.flexible, placement: .primaryAction)
+    }
+
+    @ToolbarContentBuilder
+    private var legacyToolbarItems: some ToolbarContent {
+        if showsSearchFiltersInToolbar {
             ToolbarItem(placement: .navigation) {
                 searchFiltersToolbarButton
             }
@@ -519,13 +542,8 @@ struct InstanceBrowseView: View {
                     .fixedSize()
             }
         }
-        // Pin the trailing group (search field) to the right edge,
-        // matching the global Search view.
-        if #available(macOS 26, *) {
-            ToolbarSpacer(.flexible, placement: .primaryAction)
-        }
-        #endif
     }
+    #endif
     #endif
 
     /// The main content switch, shared by both platform layouts: search mode,
