@@ -29,6 +29,7 @@ jobs:
       - name: Work around actool .icon crash (FB20183399)
         run: |
           rm -rf StreamSnip.icon
+          sed -i.bak '/StreamSnip\.icon/d' StreamSnip.xcodeproj/project.pbxproj
 
       - name: Build for testing
         run: >
