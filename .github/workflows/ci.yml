@@ -17,10 +17,18 @@ jobs:
       - name: Select Xcode (latest stable)
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.2"
+          xcode-version: latest-stable
 
       - name: Resolve package dependencies
         run: xcodebuild -resolvePackageDependencies
+
+      # Apple actool regression (FB20183399): compiling an Icon Composer .icon
+      # for macOS crashes AssetCatalogAgent on Xcode <= 26.3. The tvOS job
+      # still compiles StreamSnip.icon, so coverage is kept; drop it here and
+      # fall back to the legacy AppIcon.appiconset until runners ship 26.4.1.
+      - name: Work around actool .icon crash (FB20183399)
+        run: |
+          rm -rf StreamSnip.icon
 
       - name: Build for testing
         run: >
@@ -28,6 +36,7 @@ jobs:
           -scheme StreamSnip
           -configuration Debug
           -destination 'platform=macOS'
+          ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon
           CODE_SIGNING_ALLOWED=NO
           CODE_SIGNING_REQUIRED=NO
           build-for-testing
@@ -38,6 +47,7 @@ jobs:
           -scheme StreamSnip
           -destination 'platform=macOS'
           -only-testing:StreamSnipTests
+          ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon
           CODE_SIGNING_ALLOWED=NO
 
   build-tvos:
