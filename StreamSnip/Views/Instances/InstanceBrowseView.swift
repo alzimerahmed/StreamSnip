@@ -270,272 +270,24 @@ struct InstanceBrowseView: View {
         #endif
     }
 
-    var body: some View {
-        let backgroundStyle: ListBackgroundStyle = listStyle == .inset ? .grouped : .plain
+    /// The GeometryReader shell: per-platform content with navigation chrome,
+    /// sheets and dialogs attached. The single `body` expression had grown
+    /// past what the type checker could handle, so it is split into the
+    /// shell here and the extracted sections further down.
+    @ViewBuilder
+    private var browseShell: some View {
         GeometryReader { geometry in
             #if os(tvOS)
-            VStack(spacing: 0) {
-                // tvOS: Search field, type filter, search filters, view options
-                HStack(spacing: 24) {
-                    TextField("instance.browse.search.placeholder", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .onSubmit {
-                            searchViewModel?.cancelSuggestions()
-                            Task { await searchViewModel?.search(query: searchText) }
-                        }
-
-                    if isInSearchMode {
-                        // Type filter
-                        filterMenu(
-                            title: (searchViewModel?.filters.type ?? .video).title,
-                            selection: Binding(
-                                get: { searchViewModel?.filters.type ?? .video },
-                                set: { searchViewModel?.filters.type = $0 }
-                            ),
-                            options: SearchContentType.allCases,
-                            labelForOption: { $0.title }
-                        )
-
-                        // Combined search filters menu
-                        tvOSFiltersMenu
-                    }
-
-                    Menu {
-                        instanceMenuContent
-                    } label: {
-                        Label(String(localized: "common.more"), systemImage: "ellipsis")
-                    }
-                }
-                .focusSection()
-                .padding(.horizontal, 48)
-                .padding(.top, 20)
-                .padding(.bottom, 20)
-                // Content
-                ScrollView {
-                    VStack(spacing: 0) {
-                        Spacer()
-                            .frame(height: 20)
-
-                        // Tab picker (hidden during search)
-                        if !isInSearchMode {
-                            tabPicker
-                                .padding()
-                        }
-
-                        // Content
-                        Group {
-                            if isInSearchMode, let vm = searchViewModel {
-                                if !vm.hasSearched {
-                                    if vm.suggestions.isEmpty {
-                                        searchHintView
-                                    } else {
-                                        suggestionsView
-                                    }
-                                } else if vm.isSearching && !vm.hasResults {
-                                    ProgressView()
-                                        .frame(maxWidth: .infinity, minHeight: 200)
-                                } else if let error = vm.errorMessage, !vm.hasResults {
-                                    searchErrorView(error)
-                                } else if vm.hasResults {
-                                    searchResultsContent
-                                } else {
-                                    searchEmptyView
-                                }
-                            } else if selectedTab == .playlists {
-                                if isLoading && userPlaylists.isEmpty {
-                                    ProgressView()
-                                        .frame(maxWidth: .infinity, minHeight: 200)
-                                } else if let error = errorMessage, userPlaylists.isEmpty {
-                                    errorView(error)
-                                } else if !userPlaylists.isEmpty {
-                                    switch layout {
-                                    case .list:
-                                        playlistsListContent
-                                    case .grid:
-                                        playlistsGridContent
-                                    }
-                                } else {
-                                    playlistsEmptyView
-                                }
-                            } else if isLoading && currentVideos.isEmpty {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity, minHeight: 200)
-                            } else if let error = errorMessage, currentVideos.isEmpty {
-                                errorView(error)
-                            } else if !currentVideos.isEmpty {
-                                switch layout {
-                                case .list:
-                                    listContent
-                                case .grid:
-                                    gridContent
-                                }
-                            } else {
-                                emptyView
-                            }
-                        }
-                    }
-                }
-                .scrollClipDisabled()
-                .refreshable {
-                    await startContentLoad(forceRefresh: true)
-                }
-                .focusSection()
-            }
-            .onChange(of: geometry.size.width, initial: true) { _, newWidth in
-                viewWidth = newWidth
-            }
+            tvOSContent(geometry: geometry)
             #else
-            backgroundStyle.color
-                .ignoresSafeArea()
-                .overlay(
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            // Tab picker (hidden during search; lives in the toolbar on macOS)
-                            #if !os(macOS)
-                            if !isInSearchMode {
-                                tabPicker
-                                    .padding()
-                            }
-                            #endif
-
-                            // Feed channel filter strip (hidden during search)
-                            if selectedTab == .feed && !feedSubscriptions.isEmpty && !isInSearchMode {
-                                feedChannelFilterStrip
-                            }
-
-                            // Search filter strip (shown persistently after search submitted; lives in the toolbar on macOS)
-                            #if !os(macOS)
-                            if isInSearchMode && (searchViewModel?.hasSearched ?? false) && instance.supportsSearchFilters {
-                                searchFiltersStrip
-                            }
-                            #endif
-
-                            // Content
-                            Group {
-                                if isInSearchMode, let vm = searchViewModel {
-                                    // Search mode content
-                                    if !vm.hasSearched {
-                                        // Typing but not yet submitted - show suggestions or hint
-                                        if vm.suggestions.isEmpty {
-                                            searchHintView
-                                        } else {
-                                            suggestionsView
-                                        }
-                                    } else if vm.isSearching && !vm.hasResults {
-                                        ProgressView()
-                                            .frame(maxWidth: .infinity, minHeight: 200)
-                                    } else if let error = vm.errorMessage, !vm.hasResults {
-                                        searchErrorView(error)
-                                    } else if vm.hasResults {
-                                        searchResultsContent
-                                    } else {
-                                        searchEmptyView
-                                    }
-                                } else if selectedTab == .playlists {
-                                    // Playlists tab content
-                                    if isLoading && userPlaylists.isEmpty {
-                                        ProgressView()
-                                            .frame(maxWidth: .infinity, minHeight: 200)
-                                    } else if let error = errorMessage, userPlaylists.isEmpty {
-                                        errorView(error)
-                                    } else if !userPlaylists.isEmpty {
-                                        switch layout {
-                                        case .list:
-                                            playlistsListContent
-                                        case .grid:
-                                            playlistsGridContent
-                                        }
-                                    } else {
-                                        playlistsEmptyView
-                                    }
-                                } else if isLoading && currentVideos.isEmpty {
-                                    ProgressView()
-                                        .frame(maxWidth: .infinity, minHeight: 200)
-                                } else if let error = errorMessage, currentVideos.isEmpty {
-                                    errorView(error)
-                                } else if !currentVideos.isEmpty {
-                                    // Conditional layout based on user preference
-                                    switch layout {
-                                    case .list:
-                                        listContent
-                                    case .grid:
-                                        gridContent
-                                    }
-                                } else {
-                                    emptyView
-                                }
-                            }
-                        }
-                    }
-                    .refreshable {
-                        await startContentLoad(forceRefresh: true)
-                    }
-                )
-            .onChange(of: geometry.size.width, initial: true) { _, newWidth in
-                viewWidth = newWidth
-            }
+            defaultContent(geometry: geometry)
             #endif
         }
         #if !os(tvOS)
         .navigationTitle(instance.displayName)
         .toolbarTitleDisplayMode(.inlineLarge)
         .toolbar {
-            // Instance menu first so it is the leftmost navigation item on macOS.
-            ToolbarItem(placement: viewOptionsPlacement) {
-                Menu {
-                    instanceMenuContent
-                } label: {
-                    Label(String(localized: "common.more"), systemImage: "ellipsis")
-                }
-                .liquidGlassTransitionSource(id: "instanceBrowseViewOptions", in: sheetTransition)
-                #if os(macOS)
-                .popover(isPresented: $showViewOptions, arrowEdge: .bottom) {
-                    viewOptionsSheetContent
-                }
-                #endif
-            }
-            #if os(macOS)
-            if #available(macOS 26, *) {
-                // Render the items bare (conditional `if`, no opacity/disabled
-                // wrappers): wrapping a `.segmented` Picker inserts a hosting layer
-                // that makes the toolbar fall back to a Liquid-Glass pill instead of
-                // the native segmented control. The search filters button shows only
-                // while displaying search results; the principal picker swaps between
-                // the browse tab picker and the search content type picker.
-                if showsSearchFiltersInToolbar {
-                    ToolbarItem(placement: .navigation) {
-                        searchFiltersToolbarButton
-                    }
-                }
-                if isToolbarPickerVisible {
-                    ToolbarItem(placement: .principal) {
-                        if showsSearchFiltersInToolbar {
-                            searchContentTypePicker
-                        } else {
-                            tabPicker
-                        }
-                    }
-                }
-            } else if showsSearchFiltersInToolbar {
-                ToolbarItem(placement: .navigation) {
-                    searchFiltersToolbarButton
-                }
-                ToolbarItem(placement: .principal) {
-                    searchContentTypePicker
-                        .fixedSize()
-                }
-            } else if !isInSearchMode {
-                ToolbarItem(placement: .principal) {
-                    tabPicker
-                        .fixedSize()
-                }
-            }
-            // Pin the trailing group (search field) to the right edge,
-            // matching the global Search view.
-            if #available(macOS 26, *) {
-                ToolbarSpacer(.flexible, placement: .primaryAction)
-            }
-            #endif
+            browseToolbarContent
         }
         #endif
         #if !os(macOS)
@@ -595,6 +347,10 @@ struct InstanceBrowseView: View {
         } message: {
             Text(String(localized: "accounts.remove.confirm.message"))
         }
+    }
+
+    var body: some View {
+        browseShell
         .task {
             // Initialize search view model
             if let appEnvironment {
@@ -705,6 +461,248 @@ struct InstanceBrowseView: View {
         }
         #endif
     }
+
+    // MARK: - Body Sections
+
+    #if !os(tvOS)
+    /// Toolbar items: the instance menu, plus on macOS the search filters
+    /// button and the principal picker.
+    @ToolbarContentBuilder
+    private var browseToolbarContent: some ToolbarContent {
+        // Instance menu first so it is the leftmost navigation item on macOS.
+        ToolbarItem(placement: viewOptionsPlacement) {
+            Menu {
+                instanceMenuContent
+            } label: {
+                Label(String(localized: "common.more"), systemImage: "ellipsis")
+            }
+            .liquidGlassTransitionSource(id: "instanceBrowseViewOptions", in: sheetTransition)
+            #if os(macOS)
+            .popover(isPresented: $showViewOptions, arrowEdge: .bottom) {
+                viewOptionsSheetContent
+            }
+            #endif
+        }
+        #if os(macOS)
+        if #available(macOS 26, *) {
+            // Render the items bare (conditional `if`, no opacity/disabled
+            // wrappers): wrapping a `.segmented` Picker inserts a hosting layer
+            // that makes the toolbar fall back to a Liquid-Glass pill instead of
+            // the native segmented control. The search filters button shows only
+            // while displaying search results; the principal picker swaps between
+            // the browse tab picker and the search content type picker.
+            if showsSearchFiltersInToolbar {
+                ToolbarItem(placement: .navigation) {
+                    searchFiltersToolbarButton
+                }
+            }
+            if isToolbarPickerVisible {
+                ToolbarItem(placement: .principal) {
+                    if showsSearchFiltersInToolbar {
+                        searchContentTypePicker
+                    } else {
+                        tabPicker
+                    }
+                }
+            }
+        } else if showsSearchFiltersInToolbar {
+            ToolbarItem(placement: .navigation) {
+                searchFiltersToolbarButton
+            }
+            ToolbarItem(placement: .principal) {
+                searchContentTypePicker
+                    .fixedSize()
+            }
+        } else if !isInSearchMode {
+            ToolbarItem(placement: .principal) {
+                tabPicker
+                    .fixedSize()
+            }
+        }
+        // Pin the trailing group (search field) to the right edge,
+        // matching the global Search view.
+        if #available(macOS 26, *) {
+            ToolbarSpacer(.flexible, placement: .primaryAction)
+        }
+        #endif
+    }
+    #endif
+
+    /// The main content switch, shared by both platform layouts: search mode,
+    /// the playlists tab, or the selected tab's videos rendered in list or
+    /// grid layout.
+    @ViewBuilder
+    private var contentSection: some View {
+        Group {
+            if isInSearchMode, let vm = searchViewModel {
+                // Search mode content
+                if !vm.hasSearched {
+                    // Typing but not yet submitted - show suggestions or hint
+                    if vm.suggestions.isEmpty {
+                        searchHintView
+                    } else {
+                        suggestionsView
+                    }
+                } else if vm.isSearching && !vm.hasResults {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, minHeight: 200)
+                } else if let error = vm.errorMessage, !vm.hasResults {
+                    searchErrorView(error)
+                } else if vm.hasResults {
+                    searchResultsContent
+                } else {
+                    searchEmptyView
+                }
+            } else if selectedTab == .playlists {
+                // Playlists tab content
+                if isLoading && userPlaylists.isEmpty {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, minHeight: 200)
+                } else if let error = errorMessage, userPlaylists.isEmpty {
+                    errorView(error)
+                } else if !userPlaylists.isEmpty {
+                    switch layout {
+                    case .list:
+                        playlistsListContent
+                    case .grid:
+                        playlistsGridContent
+                    }
+                } else {
+                    playlistsEmptyView
+                }
+            } else if isLoading && currentVideos.isEmpty {
+                ProgressView()
+                    .frame(maxWidth: .infinity, minHeight: 200)
+            } else if let error = errorMessage, currentVideos.isEmpty {
+                errorView(error)
+            } else if !currentVideos.isEmpty {
+                // Conditional layout based on user preference
+                switch layout {
+                case .list:
+                    listContent
+                case .grid:
+                    gridContent
+                }
+            } else {
+                emptyView
+            }
+        }
+    }
+
+    #if os(tvOS)
+    /// tvOS layout: the header row above a scrolling content area.
+    private func tvOSContent(geometry: GeometryProxy) -> some View {
+        VStack(spacing: 0) {
+            // tvOS: Search field, type filter, search filters, view options
+            tvOSHeader
+
+            // Content
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer()
+                        .frame(height: 20)
+
+                    // Tab picker (hidden during search)
+                    if !isInSearchMode {
+                        tabPicker
+                            .padding()
+                    }
+
+                    // Content
+                    contentSection
+                }
+            }
+            .scrollClipDisabled()
+            .refreshable {
+                await startContentLoad(forceRefresh: true)
+            }
+            .focusSection()
+        }
+        .onChange(of: geometry.size.width, initial: true) { _, newWidth in
+            viewWidth = newWidth
+        }
+    }
+
+    /// tvOS header row: search field, type filter, search filters, view options.
+    private var tvOSHeader: some View {
+        HStack(spacing: 24) {
+            TextField("instance.browse.search.placeholder", text: $searchText)
+                .textFieldStyle(.plain)
+                .onSubmit {
+                    searchViewModel?.cancelSuggestions()
+                    Task { await searchViewModel?.search(query: searchText) }
+                }
+
+            if isInSearchMode {
+                // Type filter
+                filterMenu(
+                    title: (searchViewModel?.filters.type ?? .video).title,
+                    selection: Binding(
+                        get: { searchViewModel?.filters.type ?? .video },
+                        set: { searchViewModel?.filters.type = $0 }
+                    ),
+                    options: SearchContentType.allCases,
+                    labelForOption: { $0.title }
+                )
+
+                // Combined search filters menu
+                tvOSFiltersMenu
+            }
+
+            Menu {
+                instanceMenuContent
+            } label: {
+                Label(String(localized: "common.more"), systemImage: "ellipsis")
+            }
+        }
+        .focusSection()
+        .padding(.horizontal, 48)
+        .padding(.top, 20)
+        .padding(.bottom, 20)
+    }
+    #else
+    /// Default layout: the list background color with the scrolling content
+    /// overlaid.
+    private func defaultContent(geometry: GeometryProxy) -> some View {
+        let backgroundStyle: ListBackgroundStyle = listStyle == .inset ? .grouped : .plain
+        return backgroundStyle.color
+            .ignoresSafeArea()
+            .overlay(
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Tab picker (hidden during search; lives in the toolbar on macOS)
+                        #if !os(macOS)
+                        if !isInSearchMode {
+                            tabPicker
+                                .padding()
+                        }
+                        #endif
+
+                        // Feed channel filter strip (hidden during search)
+                        if selectedTab == .feed && !feedSubscriptions.isEmpty && !isInSearchMode {
+                            feedChannelFilterStrip
+                        }
+
+                        // Search filter strip (shown persistently after search submitted; lives in the toolbar on macOS)
+                        #if !os(macOS)
+                        if isInSearchMode && (searchViewModel?.hasSearched ?? false) && instance.supportsSearchFilters {
+                            searchFiltersStrip
+                        }
+                        #endif
+
+                        // Content
+                        contentSection
+                    }
+                }
+                .refreshable {
+                    await startContentLoad(forceRefresh: true)
+                }
+            )
+            .onChange(of: geometry.size.width, initial: true) { _, newWidth in
+                viewWidth = newWidth
+            }
+    }
+    #endif
 
     // MARK: - Computed Properties
 
