@@ -282,7 +282,7 @@ struct ClipEditSheet: View {
 
     #if !os(tvOS)
     private var exportSection: some View {
-        Section(String(localized: "clips.edit.export", defaultValue: "Export")) {
+        Section {
             Button {
                 guard let appEnvironment else { return }
                 isExportingSegment = true
@@ -294,6 +294,8 @@ struct ClipEditSheet: View {
                 Label(String(localized: "clips.export.segment", defaultValue: "Download Segment (Beta)"), systemImage: "arrow.down.circle")
             }
             .disabled(isExportingSegment)
+        } header: {
+            Text(String(localized: "clips.edit.export", defaultValue: "Export"))
         } footer: {
             Text(String(localized: "clips.export.segment.footer", defaultValue: "Exports the clip's range from a direct video file. Adaptive streams (HLS/DASH) and sources without partial-download support can't be exported."))
         }
