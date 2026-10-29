@@ -1104,7 +1104,7 @@ module UITest
 
     # Find the username/password text fields under the "HTTP Basic Authentication"
     # section header in AddRemoteServerView. Mirrors find_auth_text_fields but
-    # anchored on the localized header used for non-Yattee-Server instance types.
+    # anchored on the localized header used for non-StreamSnip-Server instance types.
     # Falls back to a plain "Authentication" header for Yattee Server forms.
     # @return [Array<Hash>] Array of text field elements
     def find_basic_auth_text_fields

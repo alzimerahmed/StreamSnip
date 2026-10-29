@@ -9,7 +9,7 @@
 #
 # Requirements:
 #   - "Developer ID Application" certificate in the login keychain
-#   - "match Direct stream.yattee.app macos" provisioning profile installed
+#   - "match Direct com.alzimerahmed.StreamSnip macos" provisioning profile installed
 #     (run `fastlane match developer_id --platform macos --readonly` if missing)
 #   - fastlane/.env with DEVELOPER_KEY_ID / DEVELOPER_KEY_ISSUER_ID /
 #     DEVELOPER_KEY_CONTENT (base64-encoded .p8) for notarization
@@ -17,8 +17,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP_NAME=Yattee
-BUNDLE_ID=stream.yattee.app
+APP_NAME=StreamSnip
+BUNDLE_ID=com.alzimerahmed.StreamSnip
 TEAM_ID=78Z5H3M6RJ
 PROFILE="match Direct ${BUNDLE_ID} macos"
 

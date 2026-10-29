@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a bug or unexpected behavior in the Yattee app
+description: Report a bug or unexpected behavior in the StreamSnip app
 labels: "bug"
 body:
   - type: markdown
@@ -100,7 +100,7 @@ body:
         3. Open **View Logs** and tap **Export Logs**. On tvOS, scan the QR code or open the URL shown on another device.
         4. Drag the exported file into this field.
 
-        If the app crashed, also attach the crash log from **Settings → Privacy & Security → Analytics & Improvements → Analytics Data** (entries starting with `Yattee`).
+        If the app crashed, also attach the crash log from **Settings → Privacy & Security → Analytics & Improvements → Analytics Data** (entries starting with `StreamSnip`).
       placeholder: Drag the exported log file here
     validations:
       required: false

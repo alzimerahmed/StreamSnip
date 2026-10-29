@@ -16,7 +16,7 @@ require 'json'
 # Change to project directory
 Dir.chdir(File.expand_path('..', __dir__))
 
-XCSTRINGS_FILE = 'Yattee/Localizable.xcstrings'
+XCSTRINGS_FILE = 'StreamSnip/Localizable.xcstrings'
 
 unless File.exist?(XCSTRINGS_FILE)
   warn "Error: #{XCSTRINGS_FILE} not found"

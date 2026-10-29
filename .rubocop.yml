@@ -1,4 +1,4 @@
-# RuboCop configuration for Yattee UI tests
+# RuboCop configuration for StreamSnip UI tests
 # Relaxed configuration matching existing code style
 
 plugins:

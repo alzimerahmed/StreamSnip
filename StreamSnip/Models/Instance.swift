@@ -1,0 +1,373 @@
+//
+//  Instance.swift
+//  StreamSnip
+//
+//  Represents a backend instance (Invidious, Piped, PeerTube, or Yattee Server).
+//
+
+import Foundation
+
+/// The type of backend instance.
+enum InstanceType: String, Codable, CaseIterable, Sendable {
+    case invidious
+    case piped
+    case peertube
+    case yatteeServer
+    case jellyfin
+
+    var displayName: String {
+        switch self {
+        case .invidious: return String(localized: "instances.type.invidious")
+        case .piped: return String(localized: "instances.type.piped")
+        case .peertube: return String(localized: "instances.type.peertube")
+        case .yatteeServer: return String(localized: "instances.type.yatteeServer")
+        case .jellyfin: return String(localized: "instances.type.jellyfin", defaultValue: "Jellyfin")
+        }
+    }
+
+    var systemImage: String {
+        "globe"
+    }
+
+    var contentSource: ContentSource {
+        switch self {
+        case .invidious, .piped, .yatteeServer:
+            return .global(provider: ContentSource.youtubeProvider)
+        case .peertube:
+            // For PeerTube, this should be called with the specific instance URL
+            fatalError("Use contentSource(for:) for PeerTube instances")
+        case .jellyfin:
+            fatalError("Use contentSource(for:) for Jellyfin instances")
+        }
+    }
+
+    func contentSource(for url: URL) -> ContentSource {
+        switch self {
+        case .invidious, .piped, .yatteeServer:
+            return .global(provider: ContentSource.youtubeProvider)
+        case .peertube:
+            return .federated(provider: ContentSource.peertubeProvider, instance: url)
+        case .jellyfin:
+            return .federated(provider: ContentSource.jellyfinProvider, instance: url)
+        }
+    }
+}
+
+/// Represents a backend instance configuration.
+struct Instance: Identifiable, Codable, Hashable, Sendable {
+    /// Unique identifier for this instance configuration.
+    let id: UUID
+
+    /// The type of this instance.
+    let type: InstanceType
+
+    /// The base URL of the instance.
+    let url: URL
+
+    /// Optional URL of the web frontend, when it differs from the API URL
+    /// (Piped serves its API and frontend from separate hosts). Used for
+    /// browser-facing actions (open in browser, copy link) — never for API calls.
+    var frontendURL: URL?
+
+    /// Optional user-defined name for this instance.
+    var name: String?
+
+    /// Whether this instance is currently enabled.
+    var isEnabled: Bool
+
+    /// The date this instance was added.
+    let dateAdded: Date
+
+    /// Whether to allow invalid/self-signed SSL certificates.
+    var allowInvalidCertificates: Bool
+
+    /// Whether to route video streams through this instance instead of connecting directly to YouTube CDN.
+    var proxiesVideos: Bool
+
+    /// Whether this instance sits behind an HTTP Basic Auth reverse proxy.
+    /// Set when basic auth credentials are stored, so a missing Keychain entry
+    /// (e.g. after reinstalling and importing sources from iCloud) can be detected.
+    /// Yattee Server always requires basic auth regardless of this flag.
+    var usesBasicAuth: Bool
+
+    /// Whether a pre-revamp single login existed on this instance.
+    ///
+    /// Migration-only state. Signing in no longer sets it (see
+    /// `AccountSignInHandler`) — accounts describe logins now. It survives
+    /// because `AccountsManager.reconcileLegacyAccounts()` reads it to
+    /// synthesize the account an upgrading install should have, and because a
+    /// missing Keychain credential on an instance that has no accounts yet can
+    /// still only be detected through it.
+    ///
+    /// Everything that writes it is migration machinery:
+    /// `LegacyDataMigrationService` raises it for a login imported from
+    /// Yattee 1, `AppEnvironment.backfillCredentialFlags()` revives it when the
+    /// flag was lost but its instance-keyed credential was not, and
+    /// `AppEnvironment.signOutAndRemoveAccount(_:)` lowers it once the last
+    /// account on the instance is gone.
+    var usesAccountLogin: Bool
+
+    // MARK: - Initialization
+
+    init(
+        id: UUID = UUID(),
+        type: InstanceType,
+        url: URL,
+        frontendURL: URL? = nil,
+        name: String? = nil,
+        isEnabled: Bool = true,
+        dateAdded: Date = Date(),
+        allowInvalidCertificates: Bool = false,
+        proxiesVideos: Bool = false,
+        usesBasicAuth: Bool = false,
+        usesAccountLogin: Bool = false
+    ) {
+        self.id = id
+        self.type = type
+        self.url = url
+        self.frontendURL = frontendURL
+        self.name = name
+        self.isEnabled = isEnabled
+        self.dateAdded = dateAdded
+        self.allowInvalidCertificates = allowInvalidCertificates
+        self.proxiesVideos = proxiesVideos
+        self.usesBasicAuth = usesBasicAuth
+        self.usesAccountLogin = usesAccountLogin
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        type = try container.decode(InstanceType.self, forKey: .type)
+        url = try container.decode(URL.self, forKey: .url)
+        frontendURL = try container.decodeIfPresent(URL.self, forKey: .frontendURL)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        dateAdded = try container.decode(Date.self, forKey: .dateAdded)
+        allowInvalidCertificates = try container.decode(Bool.self, forKey: .allowInvalidCertificates)
+        proxiesVideos = try container.decodeIfPresent(Bool.self, forKey: .proxiesVideos) ?? false
+        usesBasicAuth = try container.decodeIfPresent(Bool.self, forKey: .usesBasicAuth) ?? false
+        usesAccountLogin = try container.decodeIfPresent(Bool.self, forKey: .usesAccountLogin) ?? false
+    }
+
+    // MARK: - Computed Properties
+
+    var displayName: String {
+        name ?? url.host ?? url.absoluteString
+    }
+
+    /// The shortest thing that names this source to the user: its title when
+    /// one is set, else its host. What account labels append after the `@`.
+    var shortLabel: String? {
+        if let name, !name.isEmpty { return name }
+        return url.host
+    }
+
+    /// Returns the URL string with embedded credentials stripped for safe display in the UI.
+    var displayURL: String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.user != nil else {
+            return url.absoluteString
+        }
+        components.user = nil
+        components.password = nil
+        return components.url?.absoluteString ?? url.absoluteString
+    }
+
+    /// The URL browser-facing actions should use: the web frontend when one is
+    /// configured, else the API URL.
+    var browseURL: URL {
+        frontendURL ?? url
+    }
+
+    /// Base URL of the web watch page for building shareable YouTube links,
+    /// when this instance has one: Invidious serves its frontend at the API
+    /// URL, Piped needs the separately configured frontend URL (its API host
+    /// has no watch pages), and Yattee Server has no web frontend at all.
+    var watchPageBaseURL: URL? {
+        switch type {
+        case .invidious: return frontendURL ?? url
+        case .piped: return frontendURL
+        case .peertube, .yatteeServer: return nil
+        case .jellyfin: return nil
+        }
+    }
+
+    var contentSource: ContentSource {
+        type.contentSource(for: url)
+    }
+
+    /// Whether this instance provides YouTube content.
+    var isYouTubeInstance: Bool {
+        type == .invidious || type == .piped || type == .yatteeServer
+    }
+
+    /// Whether this instance is a PeerTube instance.
+    var isPeerTubeInstance: Bool {
+        type == .peertube
+    }
+
+    /// Whether this instance is a Yattee Server instance.
+    var isYatteeServerInstance: Bool {
+        type == .yatteeServer
+    }
+
+    /// Whether this instance is a Jellyfin server.
+    var isJellyfinInstance: Bool {
+        type == .jellyfin
+    }
+}
+
+// MARK: - Instance Capabilities
+
+extension Instance {
+    /// Whether this instance supports advanced search filters (sort, date, duration, features).
+    var supportsSearchFilters: Bool {
+        type == .invidious || type == .yatteeServer
+    }
+
+    /// Whether this instance supports user authentication/login.
+    ///
+    /// Answered by the capability table rather than a type list: an instance
+    /// offers a sign-in exactly when an account on it can do something, so a
+    /// backend that gains accounts gets its login by adding one row in
+    /// ``InstanceType/accountCapabilities``.
+    var supportsAuthentication: Bool {
+        type.accountCapabilities.supportsAccounts
+    }
+
+    /// Whether this instance supports subscription feed.
+    var supportsFeed: Bool {
+        type.accountCapabilities.supportsFeed
+    }
+
+    /// Whether this instance supports search suggestions/autocomplete.
+    var supportsSuggestions: Bool {
+        type == .invidious || type == .piped || type == .yatteeServer
+    }
+
+    /// Whether this instance supports the popular videos endpoint.
+    var supportsPopular: Bool {
+        type == .invidious || type == .yatteeServer
+    }
+
+    /// Whether this instance supports proxying video streams through itself.
+    var supportsVideoProxying: Bool {
+        type == .invidious || type == .piped || type == .yatteeServer
+    }
+
+    /// Whether this instance can sit behind an HTTP Basic Auth reverse proxy.
+    /// Piped is excluded: its session token is sent in the same `Authorization`
+    /// header that the proxy would consume, so logged-in features can't coexist
+    /// with proxy credentials.
+    var supportsHTTPBasicAuthProxy: Bool {
+        type.supportsHTTPBasicAuthProxy
+    }
+}
+
+extension InstanceType {
+    /// See `Instance.supportsHTTPBasicAuthProxy`. Type-only variant for flows
+    /// (e.g., AddRemoteServer detection) that don't yet have an `Instance`.
+    var supportsHTTPBasicAuthProxy: Bool {
+        self != .piped
+    }
+}
+
+// MARK: - Instance Validation
+
+extension Instance {
+    /// Validates the instance URL format.
+    static func validateURL(_ urlString: String) -> URL? {
+        guard var components = URLComponents(string: urlString) else {
+            return nil
+        }
+
+        // Default to HTTPS if no scheme provided, but preserve explicit HTTP
+        // (needed for local/private network servers like yt-dlp server)
+        if components.scheme == nil {
+            components.scheme = "https"
+        }
+
+        // Remove trailing slash from path
+        if components.path.hasSuffix("/") {
+            components.path = String(components.path.dropLast())
+        }
+
+        return components.url
+    }
+
+    /// Checks if a string is an IPv4 or IPv6 address.
+    static func isIPAddress(_ string: String) -> Bool {
+        // IPv4: four groups of 1-3 digits separated by dots
+        let ipv4Pattern = "^\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$"
+        if string.range(of: ipv4Pattern, options: .regularExpression) != nil {
+            return true
+        }
+
+        // IPv6: contains colons (simplified check)
+        if string.contains(":") && !string.contains("://") {
+            return true
+        }
+
+        return false
+    }
+
+    /// Infers the appropriate scheme for a URL string based on the host.
+    /// - IP addresses default to http:// (common for local servers)
+    /// - Domain names default to https://
+    /// - Explicit schemes are preserved
+    static func inferScheme(for urlString: String) -> String {
+        // Already has a scheme
+        if urlString.hasPrefix("http://") || urlString.hasPrefix("https://") || urlString.hasPrefix("smb://") {
+            if urlString.hasPrefix("http://") { return "http" }
+            if urlString.hasPrefix("https://") { return "https" }
+            if urlString.hasPrefix("smb://") { return "smb" }
+        }
+
+        // Extract host part (before any path or port)
+        let hostPart = urlString
+            .replacingOccurrences(of: "http://", with: "")
+            .replacingOccurrences(of: "https://", with: "")
+            .components(separatedBy: "/").first ?? urlString
+
+        // Remove port if present
+        let hostWithoutPort = hostPart.components(separatedBy: ":").first ?? hostPart
+
+        // IP addresses use http (common for local servers)
+        if isIPAddress(hostWithoutPort) {
+            return "http"
+        }
+
+        // Domain names use https
+        return "https"
+    }
+
+    /// Normalizes a source URL string, applying appropriate scheme and cleaning up the URL.
+    /// - Parameter urlString: The raw URL input from user
+    /// - Returns: A normalized URL or nil if invalid
+    static func normalizeSourceURL(_ urlString: String) -> URL? {
+        var input = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Handle SMB URLs specially
+        if input.lowercased().hasPrefix("smb://") {
+            return URL(string: input)
+        }
+
+        // Add scheme if missing
+        if !input.lowercased().hasPrefix("http://") && !input.lowercased().hasPrefix("https://") {
+            let scheme = inferScheme(for: input)
+            input = "\(scheme)://\(input)"
+        }
+
+        guard var components = URLComponents(string: input) else {
+            return nil
+        }
+
+        // Remove trailing slash from path
+        if components.path.hasSuffix("/") {
+            components.path = String(components.path.dropLast())
+        }
+
+        return components.url
+    }
+}

@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 #
-# UI Test Runner for Yattee
+# UI Test Runner for StreamSnip
 #
 # Usage:
 #   ./bin/ui-test [options]

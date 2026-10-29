@@ -1,4 +1,4 @@
-# git-cliff configuration for Yattee changelog generation
+# git-cliff configuration for StreamSnip changelog generation
 # https://git-cliff.org/docs/configuration
 
 [changelog]

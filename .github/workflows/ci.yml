@@ -24,8 +24,8 @@ jobs:
 
       - name: Build for testing
         run: >
-          xcodebuild -project Yattee.xcodeproj
-          -scheme Yattee
+          xcodebuild -project StreamSnip.xcodeproj
+          -scheme StreamSnip
           -configuration Debug
           -destination 'platform=macOS'
           CODE_SIGNING_ALLOWED=NO
@@ -35,9 +35,9 @@ jobs:
       - name: Run unit tests
         run: >
           xcodebuild test-without-building
-          -scheme Yattee
+          -scheme StreamSnip
           -destination 'platform=macOS'
-          -only-testing:YatteeTests
+          -only-testing:StreamSnipTests
           CODE_SIGNING_ALLOWED=NO
 
   build-tvos:
@@ -57,8 +57,8 @@ jobs:
 
       - name: Build (tvOS Simulator, unsigned)
         run: >
-          xcodebuild -project Yattee.xcodeproj
-          -scheme Yattee
+          xcodebuild -project StreamSnip.xcodeproj
+          -scheme StreamSnip
           -configuration Debug
           -destination 'platform=tvOS Simulator,name=Apple TV 4K (3rd generation)'
           CODE_SIGNING_ALLOWED=NO

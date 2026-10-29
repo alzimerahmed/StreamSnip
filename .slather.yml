@@ -1,8 +1,8 @@
 # Slather Code Coverage Configuration
 # https://github.com/SlatherOrg/slather
 
-proj: Yattee.xcodeproj
-scheme: Yattee
+proj: StreamSnip.xcodeproj
+scheme: StreamSnip
 build-directory: DerivedData
 output-directory: coverage
 
@@ -11,6 +11,6 @@ coverage_service: html
 
 # Ignore patterns - adjust as needed
 ignore:
-  - "**/YatteeTests/**"
+  - "**/StreamSnipTests/**"
   - "**/Vendor/**"
   - "**/*.generated.swift"

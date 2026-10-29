@@ -1,0 +1,954 @@
+//
+//  StreamSnipApp.swift
+//  StreamSnip
+//
+//  Main application entry point.
+//
+
+import SwiftUI
+#if !os(tvOS)
+import TipKit
+#endif
+import Combine
+import CloudKit
+import Nuke
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
+
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
+
+@main
+struct StreamSnipApp: App {
+    #if os(iOS)
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #elseif os(macOS)
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    #endif
+
+    @State private var appEnvironment = AppEnvironment.shared
+    @State private var backgroundTasksRegistered = false
+    @State private var showingClipboardAlert = false
+    @State private var detectedClipboardURL: URL?
+    @State private var lastCheckedClipboardURL: URL?
+    @Environment(\.scenePhase) private var scenePhase
+
+    // First-launch state
+    @State private var showingICloudAlert = false
+    @State private var showingICloudProgress = false
+    @State private var showingLegacyAccountsAlert = false
+    @State private var showingLegacyAccountsImport = false
+
+    // Ambiguous-link prompts are stored on NavigationCoordinator so they can
+    // be dual-hosted by the root app view (here) and the expanded player sheet.
+
+    init() {
+        // Configure Nuke image loading pipeline
+        ImageLoadingService.shared.configure()
+
+        #if !os(tvOS)
+        // TipKit: one-time hints such as the video info "tap thumbnail to play" tip
+        try? Tips.configure([.displayFrequency(.immediate), .datastoreLocation(.applicationDefault)])
+        #endif
+
+        // Register background tasks early — Apple requires BGTaskScheduler.register()
+        // to be called during the app launch sequence, before the run loop starts.
+        appEnvironment.backgroundRefreshManager.registerBackgroundTasks()
+
+        #if os(iOS)
+        BackgroundDiagnostics.shared.start(playerService: AppEnvironment.shared.playerService)
+        #endif
+        PerformanceMonitor.shared.start(appEnvironment: AppEnvironment.shared)
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .appEnvironment(appEnvironment)
+                #if !os(tvOS)
+                .tint(appEnvironment.settingsManager.resolvedAccentColor)
+                #endif
+                #if os(macOS)
+                .frame(minWidth: 800, minHeight: 500)
+                // Required on the view to prevent new windows on URL open
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+                #endif
+                .onOpenURL { url in
+                    let callback = XCallback(url)
+                    if let action = LinkActionParser().parse(url) {
+                        if action.dismissesPresentations {
+                            appEnvironment.navigationCoordinator.dismissPresentations()
+                        }
+                        Task {
+                            let result = await LinkActionPerformer(appEnvironment: appEnvironment).perform(action)
+                            callback?.open(for: result)
+                        }
+                        return
+                    }
+                    if let callback {
+                        // An x-callback-url request StreamSnip can't run: tell the caller
+                        reportUnhandledDeepLink(url)
+                        callback.open(for: .failure(
+                            code: "unsupportedAction",
+                            message: String(localized: "deepLink.unsupported.title", defaultValue: "Can't open link")
+                        ))
+                        return
+                    }
+                    // Leave open sheets alone when the link goes nowhere
+                    guard URLRouter().route(url) != nil else {
+                        reportUnhandledDeepLink(url)
+                        return
+                    }
+                    appEnvironment.navigationCoordinator.dismissPresentations()
+                    handleDeepLink(url)
+                }
+                .onContinueUserActivity(HandoffManager.activityType) { activity in
+                    appEnvironment.navigationCoordinator.dismissPresentations()
+                    handleContinuedActivity(activity)
+                }
+                .onAppear {
+                    #if !os(tvOS)
+                    SettingsManager.applyTheme(appEnvironment.settingsManager.theme)
+                    #endif
+                    registerBackgroundTasksIfNeeded()
+                    #if os(tvOS)
+                    TopShelfSnapshotWriter.startObserving(dataManager: appEnvironment.dataManager)
+                    TopShelfSnapshotWriter.writeAll(
+                        dataManager: appEnvironment.dataManager,
+                        settingsManager: appEnvironment.settingsManager
+                    )
+                    #endif
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .continueUserActivity)) { notification in
+                    if let activity = notification.object as? NSUserActivity {
+                        appEnvironment.navigationCoordinator.dismissPresentations()
+                        handleContinuedActivity(activity)
+                    }
+                }
+                #if os(iOS) || os(macOS)
+                .alert(String(localized: "alert.openVideo.title"), isPresented: $showingClipboardAlert) {
+                    Button(String(localized: "common.open")) {
+                        if let url = detectedClipboardURL {
+                            appEnvironment.navigationCoordinator.navigate(to: .externalVideo(url))
+                        }
+                    }
+                    Button(String(localized: "common.cancel"), role: .cancel) {}
+                } message: {
+                    if let url = detectedClipboardURL {
+                        Text(String(localized: "alert.openVideo.message \(url.host ?? "clipboard")"))
+                    }
+                }
+                #endif
+                // First-launch iCloud sync prompt
+                .alert(
+                    String(localized: "settings.icloud.enable.confirmation.title"),
+                    isPresented: $showingICloudAlert
+                ) {
+                    Button(String(localized: "settings.icloud.enable.confirmation.action")) {
+                        enableICloudAndWait()
+                    }
+                    Button(String(localized: "common.cancel"), role: .cancel) {
+                        finishFirstLaunchFlow()
+                    }
+                } message: {
+                    Text(String(localized: "settings.icloud.enable.confirmation.message"))
+                }
+                .alert(
+                    String(localized: "migration.accounts.prompt.title"),
+                    isPresented: $showingLegacyAccountsAlert
+                ) {
+                    Button(String(localized: "migration.accounts.prompt.review")) {
+                        showingLegacyAccountsImport = true
+                    }
+                    Button(String(localized: "migration.accounts.prompt.later"), role: .cancel) {}
+                } message: {
+                    Text(String(localized: "migration.accounts.prompt.message"))
+                }
+                #if os(macOS)
+                .sheet(isPresented: $showingICloudProgress) {
+                    ICloudSyncProgressView()
+                        .appEnvironment(appEnvironment)
+                        .interactiveDismissDisabled()
+                }
+                #else
+                .fullScreenCover(isPresented: $showingICloudProgress) {
+                    ICloudSyncProgressView()
+                        .appEnvironment(appEnvironment)
+                        // tvOS full screen covers have a transparent background,
+                        // letting the view below leak through.
+                        .tvFullScreenCoverBackground()
+                }
+                #endif
+                #if os(tvOS)
+                // tvOS sheets render as a small centered card that cannot fit
+                // the sidebar-detail layout — use a full screen cover instead.
+                .fullScreenCover(isPresented: $showingLegacyAccountsImport) {
+                    NavigationStack {
+                        TVSidebarDetailContainer(
+                            systemImage: "person.badge.key",
+                            title: String(localized: "migration.accounts.title")
+                        ) {
+                            LegacyAccountsImportView()
+                        }
+                        .appEnvironment(appEnvironment)
+                    }
+                    .tvFullScreenCoverBackground()
+                }
+                #else
+                .sheet(isPresented: $showingLegacyAccountsImport) {
+                    NavigationStack {
+                        LegacyAccountsImportView()
+                            .appEnvironment(appEnvironment)
+                    }
+                    #if os(macOS)
+                    .frame(minWidth: 560, minHeight: 560)
+                    #endif
+                }
+                #endif
+                .onReceive(NotificationCenter.default.publisher(for: .showOpenLinkSheet)) { _ in
+                    appEnvironment.navigationCoordinator.isPlayerExpanded = false
+                    appEnvironment.navigationCoordinator.presenter.present(.openLink(nil))
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .openDescriptionLink)) { notification in
+                    if let url = notification.object as? URL {
+                        handleDescriptionLink(url)
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .promptResolvedShortLink)) { notification in
+                    if let url = notification.object as? URL {
+                        appEnvironment.navigationCoordinator.resolvedShortLinkPrompt = url
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .promptAmbiguousExternalLink)) { notification in
+                    if let url = notification.object as? URL {
+                        appEnvironment.navigationCoordinator.ambiguousExternalLinkPrompt = url
+                    }
+                }
+                // Present confirmation dialogs at root level only when the expanded
+                // player isn't covering it. ExpandedPlayerSheet hosts the same
+                // dialogs when it *is* expanded, so they always sit on top.
+                .resolvedLinkPrompts(
+                    shouldHost: !appEnvironment.navigationCoordinator.isPlayerExpanded,
+                    appEnvironment: appEnvironment
+                )
+        }
+        #if os(macOS)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
+        .defaultSize(width: 1200, height: 800)
+        // Handle URLs in the existing window instead of opening a new one
+        .handlesExternalEvents(matching: Set(["*"]))
+        #endif
+        #if os(iOS) || os(macOS)
+        .commands {
+            FileCommands()
+            PlaybackCommands(appEnvironment: appEnvironment)
+            NavigationCommands(appEnvironment: appEnvironment)
+        }
+        #endif
+        #if os(tvOS)
+        .onChange(of: scenePhase) { _, newPhase in
+            LoggingService.shared.logCloudKit("[ScenePhase] Transition to: \(newPhase)")
+
+            // Handle background playback
+            appEnvironment.playerService.handleScenePhase(newPhase)
+
+            // Refresh remote control services after returning from background
+            appEnvironment.remoteControlCoordinator.handleScenePhase(newPhase)
+
+            // Handle pending notification navigation and warm cache when becoming active
+            if newPhase == .active {
+                // Refresh media source password status (Keychain state can change in background)
+                appEnvironment.mediaSourcesManager.refreshPasswordStoredStatus()
+
+                // Identity, statuses, deletion repair and the fetch, in that
+                // order — each one is what makes the next one correct.
+                Task {
+                    await resumeAccountState()
+                }
+
+                // Start periodic polling as fallback for missed push notifications
+                appEnvironment.cloudKitSync.startForegroundPolling()
+            }
+
+            // Flush pending CloudKit changes when entering background
+            if newPhase == .background {
+                appEnvironment.cloudKitSync.stopForegroundPolling()
+                // Queue current watch progress so the position reaches other devices
+                appEnvironment.playerService.syncWatchProgress()
+                Task {
+                    await appEnvironment.cloudKitSync.flushPendingChanges()
+                    // The progress save above is what enqueues the server-history
+                    // post, so the flush is created after it.
+                    await appEnvironment.watchHistorySync.flushPending()
+                }
+            }
+        }
+        #else
+        .onChange(of: scenePhase) { _, newPhase in
+            LoggingService.shared.logCloudKit("[ScenePhase] Transition to: \(newPhase)")
+
+            // Handle background playback
+            appEnvironment.playerService.handleScenePhase(newPhase)
+
+            // Refresh remote control services after returning from background
+            appEnvironment.remoteControlCoordinator.handleScenePhase(newPhase)
+
+            #if os(iOS)
+            // Notify rotation manager - stops monitoring in background to prevent
+            // fullscreen entry while app is not visible
+            DeviceRotationManager.shared.handleScenePhase(newPhase)
+            #endif
+
+            // Handle pending notification navigation and warm cache when becoming active
+            if newPhase == .active {
+                appEnvironment.notificationManager.handlePendingNavigation(
+                    using: appEnvironment.navigationCoordinator
+                )
+                // Refresh media source password status (Keychain state can change in background)
+                appEnvironment.mediaSourcesManager.refreshPasswordStoredStatus()
+
+                // Identity, statuses, deletion repair and the fetch, in that
+                // order — each one is what makes the next one correct.
+                Task {
+                    await resumeAccountState()
+                }
+
+                // Check clipboard for external video URLs
+                checkClipboardForExternalURL()
+
+                // Start periodic polling as fallback for missed push notifications
+                appEnvironment.cloudKitSync.startForegroundPolling()
+            }
+
+            // Flush pending CloudKit changes when entering background
+            if newPhase == .background {
+                appEnvironment.cloudKitSync.stopForegroundPolling()
+                // Queue current watch progress so the position reaches other devices
+                appEnvironment.playerService.syncWatchProgress()
+
+                #if os(iOS)
+                // Persist pending SwiftData changes and run the CloudKit flush
+                // inside a background-task assertion. iOS terminates apps with
+                // 0xdead10cc when they hold the SwiftData/SQLite database lock
+                // across suspension; committing now releases the lock, and the
+                // assertion keeps the app alive until the async flush finishes.
+                var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+                backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "PersistOnBackground") {
+                    LoggingService.shared.warning("Background task PersistOnBackground expired", category: .diagnostics)
+                    if backgroundTask != .invalid {
+                        UIApplication.shared.endBackgroundTask(backgroundTask)
+                        backgroundTask = .invalid
+                    }
+                }
+                // Commit any pending changes synchronously so no open SQLite
+                // transaction is left behind at suspension.
+                appEnvironment.dataManager.save()
+                Task {
+                    await appEnvironment.cloudKitSync.flushPendingChanges()
+                    // The progress save above is what enqueues the server-history
+                    // post, so the flush is created after it — and both finish
+                    // before the assertion is given up.
+                    await appEnvironment.watchHistorySync.flushPending()
+                    if backgroundTask != .invalid {
+                        LoggingService.shared.info("Background task PersistOnBackground finished", category: .diagnostics)
+                        UIApplication.shared.endBackgroundTask(backgroundTask)
+                        backgroundTask = .invalid
+                    }
+                }
+
+                if appEnvironment.settingsManager.backgroundNotificationsEnabled {
+                    appEnvironment.backgroundRefreshManager.scheduleIOSBackgroundRefresh()
+                }
+                #else
+                Task {
+                    await appEnvironment.cloudKitSync.flushPendingChanges()
+                    // The progress save above is what enqueues the server-history
+                    // post, so the flush is created after it.
+                    await appEnvironment.watchHistorySync.flushPending()
+                }
+                #endif
+            }
+        }
+        #endif
+        #if os(macOS)
+        Window(String(localized: "menu.app.settings"), id: "settings") {
+            SettingsView(showCloseButton: false)
+                .appEnvironment(appEnvironment)
+                .frame(minWidth: 600, idealWidth: 900, maxWidth: .infinity, minHeight: 520, idealHeight: 600, maxHeight: .infinity)
+        }
+        .windowResizability(.contentMinSize)
+        .defaultSize(width: 900, height: 600)
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                SettingsWindowMenuItem()
+            }
+            #if SPARKLE
+            CommandGroup(after: .appInfo) {
+                CheckForUpdatesMenuItem()
+            }
+            #endif
+        }
+        #endif
+    }
+
+    /// The part of foreground activation that has to happen in order.
+    ///
+    /// Every step here decides what the next one is allowed to see, so these
+    /// run as one sequence rather than as tasks racing each other:
+    ///
+    /// 1. The identity names whose accounts and credentials are in play at all.
+    /// 2. The status refresh says which of those this device can actually use.
+    /// 3. Only then may a tombstone move the selection — the repair prefers a
+    ///    signed-in login on the same server, and a sibling whose status is
+    ///    still being determined is one it would skip, landing on local
+    ///    instead. The repair commits, so there is no second chance at it.
+    /// 4. The fetch goes last for the same reason: a deletion it delivers
+    ///    repairs the context as it applies, off the statuses read above.
+    private func resumeAccountState() async {
+        // Retry a credential identity scope that never resolved (e.g.
+        // launched offline) - account credentials stay unavailable until it does
+        await appEnvironment.credentialIdentityScope.resolveIfNeeded()
+
+        // A credential can arrive over iCloud Keychain without the
+        // scope moving, so statuses are recomputed unconditionally.
+        appEnvironment.refreshAccountStatuses()
+
+        // Repair a context whose account was deleted on another device
+        // while this one was in the background. Only a deletion moves
+        // it — an account that merely has not synced yet is left alone.
+        appEnvironment.dataContextValidator.correctIfContextRemoved()
+
+        SubscriptionFeedCache.shared.warmIfNeeded(using: appEnvironment)
+
+        // Fetch remote CloudKit changes (catches missed push notifications)
+        await appEnvironment.cloudKitSync.fetchRemoteChanges()
+    }
+
+    private func registerBackgroundTasksIfNeeded() {
+        guard !backgroundTasksRegistered else { return }
+        backgroundTasksRegistered = true
+
+        // If notifications are enabled, schedule the first refresh
+        #if os(iOS)
+        if appEnvironment.settingsManager.backgroundNotificationsEnabled {
+            appEnvironment.backgroundRefreshManager.scheduleIOSBackgroundRefresh()
+        }
+        #endif
+
+        // Auto-delete old history entries based on retention setting
+        performHistoryCleanup()
+
+        // Run first-launch tasks: offer iCloud sync, then optionally ask about legacy accounts.
+        if !appEnvironment.settingsManager.onboardingCompleted {
+            Task {
+                await appEnvironment.cloudKitSync.refreshAccountStatus()
+
+                if appEnvironment.cloudKitSync.accountStatus == .available {
+                    // Small delay so the main UI has time to settle before the alert.
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    showingICloudAlert = true
+                } else {
+                    finishFirstLaunchFlow()
+                }
+            }
+        } else {
+            presentLegacyAccountsPromptIfNeeded()
+        }
+    }
+
+    /// Enables iCloud sync and waits for the initial upload to complete,
+    /// showing a blocking progress overlay while sync runs.
+    private func enableICloudAndWait() {
+        showingICloudProgress = true
+        Task {
+            let settings = appEnvironment.settingsManager
+            let cloudKit = appEnvironment.cloudKitSync
+
+            settings.iCloudSyncEnabled = true
+            settings.enableAllSyncCategories()
+
+            await cloudKit.enable()
+            await cloudKit.performInitialUpload()
+
+            settings.replaceWithiCloudData()
+            appEnvironment.instancesManager.replaceWithiCloudData()
+            appEnvironment.mediaSourcesManager.replaceWithiCloudData()
+
+            showingICloudProgress = false
+            finishFirstLaunchFlow()
+        }
+    }
+
+    /// Completes first-launch bookkeeping and then shows the one-time legacy account prompt if needed.
+    private func finishFirstLaunchFlow() {
+        appEnvironment.settingsManager.onboardingCompleted = true
+        presentLegacyAccountsPromptIfNeeded()
+    }
+
+    /// Shows a one-time prompt for unresolved v1 accounts.
+    private func presentLegacyAccountsPromptIfNeeded() {
+        guard appEnvironment.legacyMigrationService.shouldShowLegacyAccountsPrompt else { return }
+
+        appEnvironment.legacyMigrationService.markLegacyAccountsPromptShown()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            showingLegacyAccountsAlert = true
+        }
+    }
+
+    /// Delete old watch history entries based on the retention setting.
+    private func performHistoryCleanup() {
+        let retentionDays = appEnvironment.settingsManager.historyRetentionDays
+        guard retentionDays > 0 else { return }
+
+        let calendar = Calendar.current
+        guard let cutoffDate = calendar.date(byAdding: .day, value: -retentionDays, to: Date()) else {
+            return
+        }
+
+        appEnvironment.dataManager.clearWatchHistory(olderThan: cutoffDate)
+    }
+
+    /// Handle incoming deep link URLs.
+    private func handleDeepLink(_ url: URL) {
+        let router = URLRouter()
+        // Resolve streamsnip://open?url=… wrappers first so timestamp parsing and
+        // sheet prefill below see the real link, not the wrapper.
+        let url = router.unwrapped(url)
+        guard let destination = router.route(url) else { return }
+
+        let action = appEnvironment.settingsManager.defaultLinkAction
+
+        // Videos get special handling based on link action setting
+        if case .video(let source, _) = destination, case .id(let videoID) = source {
+            handleVideoDeepLink(videoID: videoID, originalURL: url, action: action)
+            return
+        }
+
+        // External videos also check setting
+        if case .externalVideo(let externalURL) = destination {
+            handleExternalVideoDeepLink(externalURL: externalURL, action: action)
+            return
+        }
+
+        // All other destinations use standard navigation
+        appEnvironment.navigationCoordinator.navigate(to: destination)
+    }
+
+    /// Tell the user an incoming link couldn't be opened instead of failing silently.
+    private func reportUnhandledDeepLink(_ url: URL) {
+        LoggingService.shared.warning("Deep link not handled: \(url.absoluteString)", category: .general)
+        appEnvironment.toastManager.showError(
+            String(localized: "deepLink.unsupported.title", defaultValue: "Can't open link"),
+            subtitle: url.absoluteString
+        )
+    }
+
+    /// Handle a link tapped inside a video description.
+    /// Video URLs that would interrupt active playback surface the queue sheet;
+    /// everything else reuses the standard deep-link pipeline.
+    private func handleDescriptionLink(_ url: URL) {
+        let router = URLRouter()
+        guard let destination = router.route(url) else { return }
+
+        if case .video(let source, _) = destination, case .id(let videoID) = source {
+            let queueEnabled = appEnvironment.settingsManager.queueEnabled
+            let somethingPlaying = appEnvironment.playerService.state.currentVideo != nil
+            if queueEnabled && somethingPlaying {
+                Task { await presentQueueSheetFromDeepLink(videoID: videoID) }
+                return
+            }
+        }
+
+        handleDeepLink(url)
+    }
+
+    /// Fetch a video by ID and present the queue action sheet for it.
+    private func presentQueueSheetFromDeepLink(videoID: VideoID) async {
+        guard let instance = appEnvironment.instancesManager.instance(for: videoID.source) else {
+            appEnvironment.toastManager.showError(
+                String(localized: "deepLink.noInstance.title", defaultValue: "Can't open video"),
+                subtitle: String(
+                    localized: "deepLink.noInstance.subtitle",
+                    defaultValue: "No source is configured for this video."
+                )
+            )
+            return
+        }
+
+        let toastID = appEnvironment.toastManager.show(
+            scopes: [.main, .player],
+            category: .loading,
+            title: String(localized: "deepLink.loading.title", defaultValue: "Loading video…"),
+            subtitle: instance.name,
+            autoDismissDelay: 30.0
+        )
+
+        do {
+            let video = try await appEnvironment.contentService.video(
+                id: videoID.videoID,
+                instance: instance
+            )
+            appEnvironment.toastManager.dismiss(id: toastID)
+            // The top-most sheet host (the player when expanded) presents it
+            appEnvironment.navigationCoordinator.presenter.present(.queueAction(video))
+        } catch {
+            appEnvironment.toastManager.dismiss(id: toastID)
+            appEnvironment.navigationCoordinator.navigate(to: .video(.id(videoID)))
+        }
+    }
+
+    /// Handle video deep link based on default link action setting.
+    private func handleVideoDeepLink(videoID: VideoID, originalURL: URL, action: DefaultLinkAction) {
+        let startTime = URLRouter().parseTimestamp(originalURL)
+        switch action {
+        case .open:
+            // Play directly (existing behavior)
+            Task {
+                await playVideoFromDeepLink(videoID: videoID, url: originalURL, startTime: startTime)
+            }
+
+        case .download:
+            #if !os(tvOS)
+            // Fetch video and show download sheet
+            Task {
+                await downloadVideoFromDeepLink(videoID: videoID)
+            }
+            #else
+            // tvOS doesn't support downloads, fall back to open
+            Task {
+                await playVideoFromDeepLink(videoID: videoID, url: originalURL, startTime: startTime)
+            }
+            #endif
+
+        case .ask:
+            // Show the video's details page, carrying the link's timestamp
+            Task {
+                await showLinkDetails(originalURL, fallback: .video(.id(videoID)))
+            }
+        }
+    }
+
+    /// Handle external video deep link based on default link action setting.
+    private func handleExternalVideoDeepLink(externalURL: URL, action: DefaultLinkAction) {
+        switch action {
+        case .open:
+            // Navigate to ExternalVideoView (existing behavior)
+            appEnvironment.navigationCoordinator.navigate(to: .externalVideo(externalURL))
+
+        case .download:
+            #if !os(tvOS)
+            // Extract and show download sheet
+            Task {
+                await downloadExternalVideoFromDeepLink(url: externalURL)
+            }
+            #else
+            // tvOS doesn't support downloads, fall back to open
+            appEnvironment.navigationCoordinator.navigate(to: .externalVideo(externalURL))
+            #endif
+
+        case .ask:
+            // Extract, then show the video's details page
+            Task {
+                await showLinkDetails(externalURL, fallback: .externalVideo(externalURL))
+            }
+        }
+    }
+
+    /// Load a link's video and show its details page. On failure, `fallback`
+    /// (a screen that loads the link itself) shows the error.
+    private func showLinkDetails(_ url: URL, fallback: NavigationDestination) async {
+        // A watch link inside a playlist shows both, as Open Link's Load does
+        if URLRouter().youTubePlaylistContext(url) != nil {
+            appEnvironment.navigationCoordinator.navigateToOpenedLink(.openedLinks([url]))
+            return
+        }
+
+        let toastID = appEnvironment.toastManager.show(
+            scopes: [.main, .player],
+            category: .loading,
+            title: String(localized: "deepLink.loading.title", defaultValue: "Loading video…"),
+            subtitle: url.host,
+            autoDismissDelay: 60.0
+        )
+
+        let destination: NavigationDestination
+        do {
+            destination = try await LinkVideoResolver(appEnvironment: appEnvironment).resolveDestination(url)
+        } catch {
+            LoggingService.shared.warning(
+                "Deep link details: failed to load \(url.absoluteString): \(error.localizedDescription)",
+                category: .general
+            )
+            destination = fallback
+        }
+        appEnvironment.toastManager.dismiss(id: toastID)
+        appEnvironment.navigationCoordinator.navigateToOpenedLink(destination)
+    }
+
+    /// Play a video from a deep link.
+    private func playVideoFromDeepLink(videoID: VideoID, url: URL? = nil, startTime: TimeInterval? = nil) async {
+        LoggingService.shared.info(
+            "Deep link play: videoID=\(videoID.videoID) source=\(videoID.source) startTime=\(startTime ?? -1)",
+            category: .general
+        )
+        guard let instance = appEnvironment.instancesManager.instance(for: videoID.source) else {
+            LoggingService.shared.warning(
+                "Deep link play: no instance configured for source \(videoID.source) — aborting",
+                category: .general
+            )
+            appEnvironment.toastManager.showError(
+                String(localized: "deepLink.noInstance.title", defaultValue: "Can't open video"),
+                subtitle: String(
+                    localized: "deepLink.noInstance.subtitle",
+                    defaultValue: "No source is configured for this video."
+                )
+            )
+            return
+        }
+        LoggingService.shared.info(
+            "Deep link play: using instance \(instance.url.absoluteString)",
+            category: .general
+        )
+
+        let toastID = appEnvironment.toastManager.show(
+            scopes: [.main, .player],
+            category: .loading,
+            title: String(localized: "deepLink.loading.title", defaultValue: "Loading video…"),
+            subtitle: instance.name,
+            autoDismissDelay: 30.0
+        )
+
+        do {
+            let video = try await appEnvironment.contentService.video(
+                id: videoID.videoID,
+                instance: instance
+            )
+            LoggingService.shared.info("Deep link play: fetched video, opening player", category: .general)
+            // A watch link inside a playlist queues the playlist around it
+            await LinkVideoResolver(appEnvironment: appEnvironment).play(video, from: url, startTime: startTime)
+            appEnvironment.toastManager.dismiss(id: toastID)
+        } catch {
+            LoggingService.shared.error(
+                "Deep link play: video fetch failed (\(error.localizedDescription)), falling back to info view",
+                category: .general
+            )
+            appEnvironment.toastManager.dismiss(id: toastID)
+            // If video fetch fails, fall back to navigating to the video info view
+            appEnvironment.navigationCoordinator.navigate(to: .video(.id(videoID)))
+        }
+    }
+
+    #if !os(tvOS)
+    /// Download a video from a deep link.
+    private func downloadVideoFromDeepLink(videoID: VideoID) async {
+        guard let instance = appEnvironment.instancesManager.instance(for: videoID.source) else { return }
+
+        do {
+            let (video, streams, captions, _) = try await appEnvironment.contentService
+                .videoWithProxyStreamsAndCaptionsAndStoryboards(
+                    id: videoID.videoID,
+                    instance: instance
+                )
+
+            await MainActor.run {
+                appEnvironment.navigationCoordinator.presenter.present(.downloadOptions(video, streams: streams, captions: captions))
+            }
+        } catch {
+            // Fall back to open on error
+            await playVideoFromDeepLink(videoID: videoID)
+        }
+    }
+
+    /// Download an external video from a deep link.
+    private func downloadExternalVideoFromDeepLink(url: URL) async {
+        // A file mpv plays as-is can be downloaded straight from its URL
+        if let probe = await DirectMediaProbe.probe(url) {
+            let video = DirectMediaHelper.createVideo(from: url, probe: probe)
+            let stream = DirectMediaHelper.createStream(from: url, probe: probe)
+            await MainActor.run {
+                appEnvironment.navigationCoordinator.presenter.present(.downloadOptions(video, streams: [stream], captions: []))
+            }
+            return
+        }
+
+        guard let instance = appEnvironment.instancesManager.yatteeServerInstance else {
+            // No Yattee Server - fall back to open
+            appEnvironment.navigationCoordinator.navigate(to: .externalVideo(url))
+            return
+        }
+
+        do {
+            let (video, streams, captions) = try await appEnvironment.contentService
+                .extractURL(url, instance: instance)
+
+            await MainActor.run {
+                appEnvironment.navigationCoordinator.presenter.present(.downloadOptions(video, streams: streams, captions: captions))
+            }
+        } catch {
+            // Fall back to open on error
+            appEnvironment.navigationCoordinator.navigate(to: .externalVideo(url))
+        }
+    }
+    #endif
+
+    // MARK: - Handoff
+
+    /// Handle continued activity from Handoff.
+    private func handleContinuedActivity(_ activity: NSUserActivity) {
+        LoggingService.shared.debug("[Handoff] Received activity: \(activity.activityType) - title: \(activity.title ?? "none")", category: .general)
+        LoggingService.shared.debug("[Handoff] UserInfo: \(activity.userInfo ?? [:])", category: .general)
+
+        guard let (destination, playbackTime) = appEnvironment.handoffManager
+            .restoreDestination(from: activity) else {
+            LoggingService.shared.debug("[Handoff] Failed to restore destination from activity", category: .general)
+            return
+        }
+
+        LoggingService.shared.debug("[Handoff] Restored destination: \(destination), playbackTime: \(playbackTime ?? -1)", category: .general)
+
+        // For video destinations with playback time, play with resume
+        if case .video(let source, _) = destination, case .id(let videoID) = source {
+            Task {
+                await playVideoFromHandoff(videoID: videoID, startTime: playbackTime)
+            }
+            return
+        }
+
+        // For external video with playback time
+        if case .externalVideo = destination, playbackTime != nil {
+            // External videos don't support resume time in the same way
+            // Just navigate to the destination
+            appEnvironment.navigationCoordinator.navigate(to: destination)
+            return
+        }
+
+        // All other destinations use standard navigation
+        appEnvironment.navigationCoordinator.navigate(to: destination)
+    }
+
+    /// Play a video from Handoff continuation.
+    private func playVideoFromHandoff(videoID: VideoID, startTime: TimeInterval?) async {
+        LoggingService.shared.debug("[Handoff] playVideoFromHandoff called for: \(videoID.videoID)", category: .general)
+
+        guard let instance = appEnvironment.instancesManager.instance(for: videoID.source) else {
+            LoggingService.shared.debug("[Handoff] No instance available, falling back to navigation", category: .general)
+            // Fall back to navigation if no instance available
+            appEnvironment.navigationCoordinator.navigate(to: .video(.id(videoID)))
+            return
+        }
+
+        do {
+            let video = try await appEnvironment.contentService.video(
+                id: videoID.videoID,
+                instance: instance
+            )
+            LoggingService.shared.debug("[Handoff] Video fetched, calling openVideo", category: .general)
+            appEnvironment.playerService.openVideo(video, startTime: startTime)
+
+            // Always expand player after handoff (unless PiP is active)
+            // We add a small delay to ensure ContentView has set up its .onChange observers
+            // (during app launch via Handoff, the trigger can fire before the view is ready)
+            #if os(iOS) || os(macOS)
+            let isPiPActive = appEnvironment.playerService.state.pipState == .active
+            #else
+            let isPiPActive = false
+            #endif
+            LoggingService.shared.debug("[Handoff] isPiPActive: \(isPiPActive), isPlayerExpanded: \(appEnvironment.navigationCoordinator.isPlayerExpanded)", category: .general)
+            if !isPiPActive {
+                // Small delay to ensure view hierarchy is ready to observe trigger changes
+                try? await Task.sleep(for: .milliseconds(100))
+                LoggingService.shared.debug("[Handoff] Expanding player from handoff", category: .general)
+                appEnvironment.navigationCoordinator.expandPlayer()
+            }
+        } catch {
+            LoggingService.shared.debug("[Handoff] Failed to fetch video: \(error), falling back to navigation", category: .general)
+            // If video fetch fails, fall back to navigating to the video info view
+            appEnvironment.navigationCoordinator.navigate(to: .video(.id(videoID)))
+        }
+    }
+
+    // MARK: - Clipboard Detection
+
+    /// Check clipboard for external video URLs when app becomes active.
+    private func checkClipboardForExternalURL() {
+        #if os(iOS)
+        guard appEnvironment.settingsManager.clipboardURLDetectionEnabled else { return }
+
+        let clipboardURL: URL?
+        if UIPasteboard.general.hasURLs {
+            clipboardURL = UIPasteboard.general.url
+        } else if let string = UIPasteboard.general.string,
+                  let url = URL(string: string),
+                  url.scheme == "http" || url.scheme == "https" {
+            clipboardURL = url
+        } else {
+            clipboardURL = nil
+        }
+
+        guard let url = clipboardURL else { return }
+
+        // Skip if we already checked this URL
+        guard url != lastCheckedClipboardURL else { return }
+        lastCheckedClipboardURL = url
+
+        // Skip YouTube URLs - they're handled by regular deep links
+        if isYouTubeURL(url) { return }
+
+        // Skip known non-video sites
+        if isExcludedHost(url) { return }
+
+        // Only prompt if Yattee Server is configured
+        guard appEnvironment.instancesManager.yatteeServerInstance != nil else { return }
+
+        detectedClipboardURL = url
+        showingClipboardAlert = true
+        #elseif os(macOS)
+        guard appEnvironment.settingsManager.clipboardURLDetectionEnabled else { return }
+
+        guard let string = NSPasteboard.general.string(forType: .string),
+              let url = URL(string: string),
+              url.scheme == "http" || url.scheme == "https" else {
+            return
+        }
+
+        // Skip if we already checked this URL
+        guard url != lastCheckedClipboardURL else { return }
+        lastCheckedClipboardURL = url
+
+        // Skip YouTube URLs
+        if isYouTubeURL(url) { return }
+
+        // Skip known non-video sites
+        if isExcludedHost(url) { return }
+
+        // Only prompt if Yattee Server is configured
+        guard appEnvironment.instancesManager.yatteeServerInstance != nil else { return }
+
+        detectedClipboardURL = url
+        showingClipboardAlert = true
+        #endif
+    }
+
+    private func isYouTubeURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        let youtubeHosts = ["youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be"]
+        return youtubeHosts.contains(host)
+    }
+
+    private func isExcludedHost(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return true }
+        let excludedHosts = [
+            "google.com", "www.google.com",
+            "bing.com", "www.bing.com",
+            "duckduckgo.com",
+            "apple.com", "www.apple.com",
+            "github.com", "www.github.com"
+        ]
+        return excludedHosts.contains(host)
+    }
+}

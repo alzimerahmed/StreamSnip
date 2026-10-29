@@ -1,13 +1,13 @@
 # Sparkle appcast pipeline
 
-This directory contains the scripts and templates that sign Sparkle updates and maintain `appcast.xml` on the `gh-pages` branch. The feed is served at https://dl.yattee.stream/appcast.xml and consumed by Sparkle inside the Developer ID build of Yattee (see `Yattee/Services/Updates/SparkleUpdater.swift`).
+This directory contains the scripts and templates that sign Sparkle updates and maintain `appcast.xml` on the `gh-pages` branch. The feed is served at https://dl.yattee.stream/appcast.xml and consumed by Sparkle inside the Developer ID build of StreamSnip (see `StreamSnip/Services/Updates/SparkleUpdater.swift`).
 
 ## One-time setup
 
 1. **Generate the EdDSA signing key** on a trusted machine (once, ever):
    ```bash
-   # Location inside your Xcode DerivedData, after building Yattee once.
-   SPARKLE=~/Library/Developer/Xcode/DerivedData/Yattee-*/SourcePackages/artifacts/sparkle/Sparkle/bin
+   # Location inside your Xcode DerivedData, after building StreamSnip once.
+   SPARKLE=~/Library/Developer/Xcode/DerivedData/StreamSnip-*/SourcePackages/artifacts/sparkle/Sparkle/bin
    $SPARKLE/generate_keys                    # creates the keypair in Keychain
    $SPARKLE/generate_keys -p                 # prints the public key; also visible in Info.plist (SUPublicEDKey)
    ```
@@ -22,7 +22,7 @@ This directory contains the scripts and templates that sign Sparkle updates and 
 
 3. **Enable GitHub Pages**: repository Settings → Pages → Source: `Deploy from a branch` → Branch: `gh-pages` / `(root)`. The first `publish_appcast` workflow run creates the branch with the seed `appcast.xml`.
 
-4. **Confirm the public key matches `Info.plist`**: `Yattee/Info.plist`'s `SUPublicEDKey` value must equal the output of `generate_keys -p`. Any mismatch and Sparkle refuses to install updates signed with the CI's private key.
+4. **Confirm the public key matches `Info.plist`**: `StreamSnip/Info.plist`'s `SUPublicEDKey` value must equal the output of `generate_keys -p`. Any mismatch and Sparkle refuses to install updates signed with the CI's private key.
 
 ## Per-release flow (automated)
 
@@ -46,12 +46,12 @@ The `release_channel` workflow input (`beta` | `stable`, default `beta`) control
 
 ```bash
 ./scripts/sparkle/update_appcast.rb \
-  --zip path/to/Yattee-2.0.1-macOS.zip \
+  --zip path/to/StreamSnip-2.0.1-macOS.zip \
   --version 2.0.1 \
   --build 261 \
   --channel beta \
   --tag 2.0.1-beta.261 \
-  --sign-update-bin ~/Library/Developer/Xcode/DerivedData/Yattee-*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update \
+  --sign-update-bin ~/Library/Developer/Xcode/DerivedData/StreamSnip-*/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update \
   --ed-key-file /tmp/sparkle_ed_private.key \
   --appcast appcast.xml \
   --repo alzimerahmed/StreamSnip

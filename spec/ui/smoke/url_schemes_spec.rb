@@ -25,7 +25,7 @@ RSpec.describe 'URL Schemes', :smoke do
     UITest::Simulator.shutdown(@udid) if @udid && !UITest::Config.keep_simulator?
   end
 
-  # Open a URL and dismiss the iOS "Open in Yattee?" system confirmation dialog.
+  # Open a URL and dismiss the iOS "Open in StreamSnip?" system confirmation dialog.
   # The dialog is a system banner invisible to AXe (like the password save dialog),
   # so we must dismiss it with coordinate taps.
   # On iPhone 17 Pro (393x852pt), the "Open" button appears on the right side
@@ -109,69 +109,69 @@ RSpec.describe 'URL Schemes', :smoke do
     end
   end
 
-  describe 'yattee:// navigation URLs' do
+  describe 'streamsnip:// navigation URLs' do
     after(:each) do
       navigate_to_home
     end
 
-    it 'opens Playlists via yattee://playlists' do
-      open_url('yattee://playlists')
+    it 'opens Playlists via streamsnip://playlists' do
+      open_url('streamsnip://playlists')
       sleep 1
       wait_for_text('Playlists')
       expect(@axe).to have_text('Playlists')
       @axe.screenshot('url-scheme-playlists')
     end
 
-    it 'opens Bookmarks via yattee://bookmarks' do
-      open_url('yattee://bookmarks')
+    it 'opens Bookmarks via streamsnip://bookmarks' do
+      open_url('streamsnip://bookmarks')
       sleep 1
       wait_for_text('Bookmarks')
       expect(@axe).to have_text('Bookmarks')
       @axe.screenshot('url-scheme-bookmarks')
     end
 
-    it 'opens History via yattee://history' do
-      open_url('yattee://history')
+    it 'opens History via streamsnip://history' do
+      open_url('streamsnip://history')
       sleep 1
       wait_for_text('History')
       expect(@axe).to have_text('History')
       @axe.screenshot('url-scheme-history')
     end
 
-    it 'opens Downloads via yattee://downloads' do
-      open_url('yattee://downloads')
+    it 'opens Downloads via streamsnip://downloads' do
+      open_url('streamsnip://downloads')
       sleep 1
       wait_for_text('Downloads')
       expect(@axe).to have_text('Downloads')
       @axe.screenshot('url-scheme-downloads')
     end
 
-    it 'opens Channels via yattee://channels' do
-      open_url('yattee://channels')
+    it 'opens Channels via streamsnip://channels' do
+      open_url('streamsnip://channels')
       sleep 1
       wait_for_text('Channels')
       expect(@axe).to have_text('Channels')
       @axe.screenshot('url-scheme-channels')
     end
 
-    it 'opens Subscriptions via yattee://subscriptions' do
-      open_url('yattee://subscriptions')
+    it 'opens Subscriptions via streamsnip://subscriptions' do
+      open_url('streamsnip://subscriptions')
       sleep 1
       wait_for_text('Subscriptions')
       expect(@axe).to have_text('Subscriptions')
       @axe.screenshot('url-scheme-subscriptions')
     end
 
-    it 'opens Continue Watching via yattee://continue-watching' do
-      open_url('yattee://continue-watching')
+    it 'opens Continue Watching via streamsnip://continue-watching' do
+      open_url('streamsnip://continue-watching')
       sleep 1
       wait_for_text('Continue Watching')
       expect(@axe).to have_text('Continue Watching')
       @axe.screenshot('url-scheme-continue-watching')
     end
 
-    it 'opens Search via yattee://search?q=test' do
-      open_url('yattee://search?q=test')
+    it 'opens Search via streamsnip://search?q=test' do
+      open_url('streamsnip://search?q=test')
       sleep 1
       # SearchView pushed via deep link has a sparse accessibility tree -
       # only the nav bar (AXUniqueId "Search") is exposed, not its children.
@@ -183,8 +183,8 @@ RSpec.describe 'URL Schemes', :smoke do
 
     # Last in the group: on iPhone Settings opens as a sheet over Home, and the
     # next deep link dismisses it.
-    it 'opens Settings via yattee://settings' do
-      open_url('yattee://settings')
+    it 'opens Settings via streamsnip://settings' do
+      open_url('streamsnip://settings')
       sleep 1
       wait_for_text('Appearance')
       expect(@axe).to have_text('Appearance')
@@ -238,7 +238,7 @@ RSpec.describe 'URL Schemes with Backend', :url_backend do
     end
   end
 
-  # Open a yattee:// URL and dismiss the iOS "Open in Yattee?" system confirmation dialog
+  # Open a streamsnip:// URL and dismiss the iOS "Open in StreamSnip?" system confirmation dialog
   def open_url(url)
     UITest::Simulator.open_url(@udid, url)
     sleep 0.8
@@ -260,11 +260,11 @@ RSpec.describe 'URL Schemes with Backend', :url_backend do
     end
   end
 
-  # Wrap an HTTPS URL in yattee://open?url= scheme so simctl routes it to the app
+  # Wrap an HTTPS URL in streamsnip://open?url= scheme so simctl routes it to the app
   # instead of Safari. This tests the app's YouTube URL parsing via URLRouter.
   def open_youtube_url(url)
     encoded = CGI.escape(url)
-    open_url("yattee://open?url=#{encoded}")
+    open_url("streamsnip://open?url=#{encoded}")
   end
 
   # Navigate back to Home tab
@@ -347,31 +347,31 @@ RSpec.describe 'URL Schemes with Backend', :url_backend do
     navigate_to_home
   end
 
-  describe 'yattee:// content URLs' do
+  describe 'streamsnip:// content URLs' do
     after(:each) do
       cleanup_after_video
     end
 
-    it 'opens video via yattee://video/{id}' do
-      open_url('yattee://video/dQw4w9WgXcQ')
+    it 'opens video via streamsnip://video/{id}' do
+      open_url('streamsnip://video/dQw4w9WgXcQ')
       @player.wait_for_player_expanded(timeout: 20)
       @axe.screenshot('url-scheme-video')
     end
 
-    it 'opens channel via yattee://channel/{id}' do
-      open_url('yattee://channel/UC_x5XG1OV2P6uZZ5FSM9Ttw')
+    it 'opens channel via streamsnip://channel/{id}' do
+      open_url('streamsnip://channel/UC_x5XG1OV2P6uZZ5FSM9Ttw')
       wait_for_content_loaded(timeout: 20)
       @axe.screenshot('url-scheme-channel')
     end
 
-    it 'opens playlist via yattee://playlist/{id}' do
-      open_url('yattee://playlist/PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf')
+    it 'opens playlist via streamsnip://playlist/{id}' do
+      open_url('streamsnip://playlist/PLrAXtmErZgOeiKm4sgNOknGvNjby9efdf')
       wait_for_content_loaded(timeout: 20)
       @axe.screenshot('url-scheme-playlist')
     end
   end
 
-  describe 'YouTube URL parsing via yattee://open?url=' do
+  describe 'YouTube URL parsing via streamsnip://open?url=' do
     after(:each) do
       cleanup_after_video
     end

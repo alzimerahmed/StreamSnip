@@ -1,0 +1,349 @@
+//
+//  PanelSettingsTests.swift
+//  StreamSnipTests
+//
+//  Tests for details panel settings model (Codable compatibility).
+//
+
+import Foundation
+import Testing
+@testable import StreamSnip
+
+@Suite("Panel Settings Tests")
+struct PanelSettingsTests {
+    private func roundTrip(_ settings: PanelSettings) throws -> PanelSettings {
+        let encoded = try JSONEncoder().encode(settings)
+        return try JSONDecoder().decode(PanelSettings.self, from: encoded)
+    }
+
+    // MARK: - Round Trip
+
+    @Test("Default settings round-trip")
+    func defaultRoundTrip() throws {
+        let decoded = try roundTrip(.default)
+        #expect(decoded == PanelSettings.default)
+    }
+
+    @Test("Customized settings round-trip")
+    func customizedRoundTrip() throws {
+        var settings = PanelSettings.default
+        settings.layoutMode = .corner
+        settings.setDefaultVisibility(.remember, for: .landscape)
+        settings.showPageBarLabels = false
+        settings.setEnabled(false, for: .related)
+        settings.movePages(fromOffsets: IndexSet(integer: 1), toOffset: 0)
+        settings.updateSettings(
+            .info(InfoPageSettings(
+                showStatsRow: false,
+                showDescription: false,
+                descriptionCollapsedLines: 5,
+                descriptionExpandedByDefault: true
+            )),
+            for: .info
+        )
+
+        let decoded = try roundTrip(settings)
+        #expect(decoded == settings)
+        #expect(decoded.effectiveLayoutMode == .corner)
+        #expect(decoded.effectiveDefaultVisibility(for: .landscape) == .remember)
+        #expect(decoded.effectiveDefaultVisibility(for: .portrait) == .visible)
+        #expect(decoded.effectiveShowPageBarLabels == false)
+        #expect(!decoded.isPageEnabled(.related))
+
+        let info = decoded.configuration(for: .info)?.infoSettings
+        #expect(info?.effectiveShowStatsRow == false)
+        #expect(info?.effectiveShowDescription == false)
+        #expect(info?.effectiveShowChannelRow == true)
+        #expect(info?.effectiveDescriptionCollapsedLines == 5)
+        #expect(info?.effectiveDescriptionExpandedByDefault == true)
+        #expect(InfoPageSettings(descriptionCollapsedLines: 0).effectiveDescriptionCollapsedLines == 1)
+        #expect(InfoPageSettings().effectiveDescriptionCollapsedLines == 3)
+    }
+
+    @Test("Inline sections follow the configured page order and enablement")
+    func inlineSectionsFollowOrder() {
+        var settings = PanelSettings.default
+        // Default order: info, comments, related, chapters, queue
+        #expect(settings.inlineSections().map(\.pageType) == [.related, .chapters])
+
+        // Move chapters (index 3) above related (index 2)
+        settings.movePages(fromOffsets: IndexSet(integer: 3), toOffset: 2)
+        #expect(settings.inlineSections().map(\.pageType) == [.chapters, .related])
+
+        settings.setEnabled(false, for: .related)
+        #expect(settings.inlineSections().map(\.pageType) == [.chapters])
+
+        settings.updateSettings(.chapters(ChaptersPageSettings(showThumbnails: false)), for: .chapters)
+        #expect(settings.inlineSections().first?.chaptersSettings.effectiveShowThumbnails == false)
+    }
+
+    @Test("Per-page element settings round-trip for every page type")
+    func perPageSettingsRoundTrip() throws {
+        var settings = PanelSettings.default
+        settings.updateSettings(.comments(CommentsPageSettings(showAvatars: false)), for: .comments)
+        settings.updateSettings(.related(RelatedPageSettings(showThumbnails: false)), for: .related)
+        settings.updateSettings(.chapters(ChaptersPageSettings(showThumbnails: false, expandedByDefault: false)), for: .chapters)
+        settings.updateSettings(.queue(QueuePageSettings(showHistory: false)), for: .queue)
+
+        let decoded = try roundTrip(settings)
+        #expect(decoded == settings)
+        #expect(decoded.configuration(for: .comments)?.commentsSettings.effectiveShowAvatars == false)
+        #expect(decoded.configuration(for: .related)?.relatedSettings.effectiveShowThumbnails == false)
+        #expect(decoded.configuration(for: .chapters)?.chaptersSettings.effectiveShowThumbnails == false)
+        #expect(decoded.configuration(for: .chapters)?.chaptersSettings.effectiveExpandedByDefault == false)
+        #expect(decoded.configuration(for: .related)?.relatedSettings.effectiveExpandedByDefault == true)
+        #expect(decoded.configuration(for: .queue)?.queueSettings.effectiveShowHistory == false)
+    }
+
+    @Test("Typed accessors fall back to defaults for mismatched payloads")
+    func typedAccessorFallbacks() {
+        // An info payload read through the comments accessor yields defaults.
+        let page = PanelPageConfiguration(
+            pageType: .comments,
+            settings: .info(InfoPageSettings(showStatsRow: false))
+        )
+        #expect(page.commentsSettings.effectiveShowAvatars == true)
+        #expect(page.queueSettings.effectiveShowHistory == true)
+    }
+
+    // MARK: - Backward Compatibility
+
+    @Test("Layout without panelSettings decodes and falls back to default")
+    func layoutWithoutPanelSettings() throws {
+        let layout = PlayerControlsLayout.default
+        var json = try #require(
+            try JSONSerialization.jsonObject(with: JSONEncoder().encode(layout)) as? [String: Any]
+        )
+        json.removeValue(forKey: "panelSettings")
+        let data = try JSONSerialization.data(withJSONObject: json)
+
+        let decoded = try JSONDecoder().decode(PlayerControlsLayout.self, from: data)
+        #expect(decoded.panelSettings == nil)
+        #expect(decoded.effectivePanelSettings == .default)
+    }
+
+    @Test("Minimal page entries decode with defaults")
+    func minimalPageEntries() throws {
+        let json = """
+        { "pages": [ { "pageType": "info" }, { "pageType": "comments" } ] }
+        """
+        let decoded = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        #expect(decoded.pages.count == 2)
+        #expect(decoded.pages.allSatisfy { $0.isEnabled })
+        #expect(decoded.pages.allSatisfy { $0.region == .primary })
+        #expect(decoded.effectiveLayoutMode == .stacked)
+        #expect(decoded.effectiveDefaultVisibility(for: .portrait) == .visible)
+        #expect(decoded.effectiveDefaultVisibility(for: .landscape) == .hidden)
+    }
+
+    // MARK: - Forward Compatibility
+
+    @Test("Unknown page type from a future version is dropped")
+    func unknownPageTypeDropped() throws {
+        let json = """
+        { "pages": [
+            { "pageType": "info" },
+            { "pageType": "futureHologram", "isEnabled": true },
+            { "pageType": "queue" }
+        ] }
+        """
+        let decoded = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        #expect(decoded.pages.map(\.pageType) == [.info, .queue])
+    }
+
+    @Test("Unknown settings discriminator decodes to nil settings")
+    func unknownSettingsDiscriminator() throws {
+        let json = """
+        { "pages": [
+            { "pageType": "info", "settings": { "type": "futureKind", "futureKind": { "x": 1 } } }
+        ] }
+        """
+        let decoded = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        #expect(decoded.pages.count == 1)
+        #expect(decoded.pages.first?.settings == nil)
+        // nil settings fall back to defaults
+        #expect(decoded.pages.first?.infoSettings.effectiveShowDescription == true)
+    }
+
+    @Test("Legacy single default visibility seeds both orientations until set individually")
+    func legacyDefaultVisibilitySeedsBothOrientations() throws {
+        let json = """
+        { "pages": [ { "pageType": "info" } ], "defaultVisibility": "remember" }
+        """
+        var settings = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        #expect(settings.effectiveDefaultVisibility(for: .portrait) == .remember)
+        #expect(settings.effectiveDefaultVisibility(for: .landscape) == .remember)
+
+        settings.setDefaultVisibility(.visible, for: .portrait)
+        #expect(settings.effectiveDefaultVisibility(for: .portrait) == .visible)
+        #expect(settings.effectiveDefaultVisibility(for: .landscape) == .remember)
+
+        let decoded = try roundTrip(settings)
+        #expect(decoded == settings)
+
+        #expect(PanelDefaultVisibility.remember.resolve(lastVisible: true))
+        #expect(!PanelDefaultVisibility.hidden.resolve(lastVisible: true))
+        #expect(PanelDefaultVisibility.visible.resolve(lastVisible: false))
+    }
+
+    @Test("Unknown layoutMode and defaultVisibility decode to nil")
+    func unknownEnumValues() throws {
+        let json = """
+        { "pages": [ { "pageType": "info" } ],
+          "layoutMode": "floating",
+          "defaultVisibility": "sometimes" }
+        """
+        let decoded = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        #expect(decoded.layoutMode == nil)
+        #expect(decoded.defaultVisibility == nil)
+        #expect(decoded.effectiveLayoutMode == .stacked)
+        #expect(decoded.effectiveDefaultVisibility(for: .landscape) == .hidden)
+    }
+
+    // MARK: - Normalization
+
+    @Test("Normalized pages append missing types as disabled")
+    func normalizedPagesAppendMissing() throws {
+        let json = """
+        { "pages": [ { "pageType": "info" } ] }
+        """
+        let decoded = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        let normalized = decoded.normalizedPages
+        #expect(normalized.count == PanelPageType.allCases.count)
+        #expect(normalized.first?.pageType == .info)
+        #expect(normalized.dropFirst().allSatisfy { !$0.isEnabled })
+    }
+
+    @Test("Info is pinned first and always enabled")
+    func infoPinnedFirstAndEnabled() throws {
+        let json = """
+        { "pages": [
+            { "pageType": "related" },
+            { "pageType": "info", "isEnabled": false },
+            { "pageType": "chapters" }
+        ] }
+        """
+        var settings = try JSONDecoder().decode(PanelSettings.self, from: Data(json.utf8))
+        #expect(settings.normalizedPages.first?.pageType == .info)
+        #expect(settings.isPageEnabled(.info))
+        #expect(settings.enabledPages().map(\.pageType) == [.info, .related, .chapters])
+
+        settings.setEnabled(false, for: .info)
+        #expect(settings.isPageEnabled(.info))
+
+        // Moving info down, or another page above it, leaves info first
+        settings.movePages(fromOffsets: IndexSet(integer: 0), toOffset: 3)
+        #expect(settings.pages.first?.pageType == .info)
+        settings.movePages(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        #expect(settings.pages.map(\.pageType).prefix(3) == [.info, .chapters, .related])
+    }
+
+    @Test("Moving displayed pages keeps hidden pages in their slots")
+    func moveVisiblePagesKeepsHiddenSlots() {
+        var settings = PanelSettings.default
+        // Stored: info, comments, related, chapters, queue. A list that hides
+        // info (pinned) and queue displays comments, related, chapters.
+        let visible: [PanelPageType] = [.comments, .related, .chapters]
+
+        // Move chapters (displayed index 2) to the top of the displayed list
+        settings.moveVisiblePages(visible, fromOffsets: IndexSet(integer: 2), toOffset: 0)
+        #expect(settings.pages.map(\.pageType) == [.info, .chapters, .comments, .related, .queue])
+
+        // Hidden page in the middle keeps its slot
+        settings.movePages(fromOffsets: IndexSet(integer: 4), toOffset: 2)
+        #expect(settings.pages.map(\.pageType) == [.info, .chapters, .queue, .comments, .related])
+        settings.moveVisiblePages([.chapters, .comments, .related], fromOffsets: IndexSet(integer: 0), toOffset: 3)
+        #expect(settings.pages.map(\.pageType) == [.info, .comments, .queue, .related, .chapters])
+    }
+
+    @Test("Enabled pages filter by region")
+    func enabledPagesRegionFilter() {
+        let settings = PanelSettings.default
+        let primary = settings.enabledPages(in: .primary).map(\.pageType)
+        let belowVideo = settings.enabledPages(in: .belowVideo).map(\.pageType)
+        let all = settings.enabledPages().map(\.pageType)
+
+        #expect(primary == [.related, .chapters, .queue])
+        #expect(belowVideo == [.info, .comments])
+        #expect(all == [.info, .comments, .related, .chapters, .queue])
+    }
+
+    // MARK: - Mutations
+
+    @Test("Disabling and re-enabling a page preserves order")
+    func toggleKeepsOrder() {
+        var settings = PanelSettings.default
+        settings.setEnabled(false, for: .comments)
+        #expect(!settings.isPageEnabled(.comments))
+        settings.setEnabled(true, for: .comments)
+        #expect(settings.pages.map(\.pageType) == PanelSettings.default.pages.map(\.pageType))
+    }
+
+    @Test("Below-video content and layout mode round-trip through Codable")
+    func belowVideoContentAndLayoutModeRoundTrip() throws {
+        var settings = PanelSettings.default
+        settings.layoutMode = .corner
+        #expect(settings.belowVideoContent == .infoAndComments)
+
+        settings.belowVideoContent = .info
+        #expect(settings.configuration(for: .info)?.region == .belowVideo)
+        #expect(settings.configuration(for: .comments)?.region == .primary)
+        #expect(settings.enabledPages(in: .primary).map(\.pageType) == [.comments, .related, .chapters, .queue])
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(PanelSettings.self, from: data)
+        #expect(decoded.effectiveLayoutMode == .corner)
+        #expect(decoded.belowVideoContent == .info)
+
+        settings.belowVideoContent = .nothing
+        #expect(settings.enabledPages(in: .belowVideo).isEmpty)
+        #expect(settings.enabledPages(in: .primary).map(\.pageType) == [.info, .comments, .related, .chapters, .queue])
+    }
+
+    @Test("Pages the below-video host cannot render are clamped to the side column")
+    func unhostableBelowVideoRegionsClamp() {
+        // Older presets could assign any page below the video.
+        var settings = PanelSettings(pages: [
+            PanelPageConfiguration(pageType: .info, region: .primary),
+            PanelPageConfiguration(pageType: .comments, region: .belowVideo),
+            PanelPageConfiguration(pageType: .related, region: .belowVideo),
+            PanelPageConfiguration(pageType: .chapters, region: .belowVideo),
+            PanelPageConfiguration(pageType: .queue, region: .belowVideo),
+        ])
+        #expect(settings.belowVideoContent == .nothing)
+        #expect(settings.enabledPages(in: .belowVideo).isEmpty)
+        #expect(settings.effectiveRegion(for: .related) == .primary)
+
+        // Comments may sit below only together with info.
+        settings.belowVideoContent = .infoAndComments
+        #expect(settings.enabledPages(in: .belowVideo).map(\.pageType) == [.info, .comments])
+        #expect(settings.enabledPages(in: .primary).map(\.pageType) == [.related, .chapters, .queue])
+
+        settings.pages[0].region = .primary
+        #expect(settings.belowVideoContent == .nothing)
+        #expect(settings.effectiveRegion(for: .comments) == .primary)
+    }
+
+    @Test("Built-in presets default to the corner layout; legacy presets keep stacked")
+    func builtInPresetsUseCornerLayout() {
+        #expect(PanelSettings.builtInDefault.effectiveLayoutMode == .corner)
+        #expect(PanelSettings.builtInDefault.pages == PanelSettings.default.pages)
+        #expect(PanelSettings.default.effectiveLayoutMode == .stacked)
+        for preset in LayoutPreset.allBuiltIn() {
+            #expect(preset.layout.effectivePanelSettings.effectiveLayoutMode == .corner)
+        }
+    }
+
+    @Test("Landscape opens visible only in the corner layout on corner-capable devices")
+    func cornerLandscapeDefaultVisibility() {
+        let corner = PanelSettings.builtInDefault
+        let expected: PanelDefaultVisibility = PanelSettings.canHostCornerLayout ? .visible : .hidden
+        #expect(corner.effectiveDefaultVisibility(for: .landscape) == expected)
+        #expect(corner.effectiveDefaultVisibility(for: .portrait) == .visible)
+        #expect(PanelSettings.default.effectiveDefaultVisibility(for: .landscape) == .hidden)
+
+        var explicit = corner
+        explicit.landscapeDefaultVisibility = .hidden
+        #expect(explicit.effectiveDefaultVisibility(for: .landscape) == .hidden)
+    }
+}

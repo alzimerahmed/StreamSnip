@@ -1,0 +1,1489 @@
+//
+//  UnifiedPlaylistDetailView.swift
+//  StreamSnip
+//
+//  Unified view for displaying both local and remote playlists.
+//
+
+import SwiftUI
+import NukeUI
+
+/// Cached playlist data for showing header immediately while loading.
+private struct CachedPlaylistHeader {
+    let title: String
+    let thumbnailURL: URL?
+    let videoCount: Int
+
+    init(from recentPlaylist: RecentPlaylist) {
+        title = recentPlaylist.title
+        thumbnailURL = recentPlaylist.thumbnailURLString.flatMap { URL(string: $0) }
+        videoCount = recentPlaylist.videoCount
+    }
+}
+
+/// Source type for playlist data - either local (SwiftData) or remote (API).
+enum PlaylistSource: Hashable {
+    case local(UUID, title: String? = nil)
+    /// - Parameter accountID: the account this playlist was opened as, when the
+    ///   place it was opened from knows. Ownership is what makes a playlist
+    ///   editable, and only Invidious ids carry a hint of it (the `IVPL`
+    ///   prefix) — a Piped playlist looks exactly like any other.
+    case remote(PlaylistID, instance: Instance?, title: String? = nil, accountID: UUID? = nil)
+
+    /// Initial title to show while loading (if provided).
+    var initialTitle: String? {
+        switch self {
+        case .local(_, let title): return title
+        case .remote(_, _, let title, _): return title
+        }
+    }
+
+    /// The account whose playlist this is, when it was opened as one.
+    var accountID: UUID? {
+        switch self {
+        case .local: return nil
+        case .remote(_, _, _, let accountID): return accountID
+        }
+    }
+
+    /// Returns a unique identifier for zoom transitions.
+    var transitionID: AnyHashable {
+        switch self {
+        case .local(let uuid, _):
+            return uuid
+        case .remote(let playlistID, _, _, _):
+            return playlistID
+        }
+    }
+}
+
+struct UnifiedPlaylistDetailView: View {
+    @Environment(\.appEnvironment) private var appEnvironment
+    @Environment(\.dismiss) private var dismiss
+
+    let source: PlaylistSource
+
+    // MARK: - Shared State
+
+    @State private var title: String
+
+    init(source: PlaylistSource) {
+        self.source = source
+        self._title = State(initialValue: source.initialTitle ?? "")
+    }
+    @State private var descriptionText: String?
+    @State private var thumbnailURL: URL?
+    @State private var videos: [Video] = []
+    @State private var videoCount: Int = 0
+
+    // MARK: - Remote-only State
+
+    @State private var isLoading = true
+    @State private var cachedHeader: CachedPlaylistHeader?
+    @State private var errorMessage: String?
+    @State private var isImporting = false
+    @State private var importProgress: (current: Int, total: Int)?
+    @State private var remotePlaylist: Playlist?
+
+    // MARK: - Owned Remote Playlist State
+
+    /// The rows the server named in the authenticated fetch.
+    ///
+    /// `nil` means this playlist came from the public endpoint: no row here can
+    /// be named to the server, so nothing about it may be changed.
+    @State private var entries: [RemotePlaylistEntry]?
+
+    /// Which displayed row each addressable entry belongs to.
+    @State private var entriesByRow: [Int: RemotePlaylistEntry] = [:]
+
+    /// The account this playlist belongs to, when it belongs to one.
+    @State private var owningAccount: Account?
+
+    /// Whether an account ever read this playlist here, and so whether it is one
+    /// the public endpoint is entitled to describe.
+    ///
+    /// Sticky on purpose, where `owningAccount` is not: a discard clears the
+    /// account, and the notification that says the credentials are readable
+    /// again would then find nothing left to identify this as an account's
+    /// playlist — leaving whatever the discard put on screen there for good.
+    @State private var wasAccountLoaded = false
+
+    /// Whether the server lists this playlist publicly, as of the last snapshot.
+    @State private var remoteIsListed: Bool?
+
+    /// Whether the refetch that has to land before the edit sheet opens is out.
+    @State private var isPreparingEdit = false
+
+    /// Which load the state on screen belongs to.
+    ///
+    /// Credential notifications arrive repeatedly, and each one discards and
+    /// reloads. The reload awaits a server, so a second notification finds the
+    /// discard already done and starts another one — leaving the first still in
+    /// flight, free to write its error or drop the spinner over a load that has
+    /// superseded it. Only the newest generation is allowed to land.
+    @State private var loadGeneration = 0
+
+    // MARK: - Local-only State
+
+    @State private var localPlaylist: LocalPlaylist?
+    @State private var showingEditSheet = false
+    @State private var showingDeleteConfirmation = false
+    @State private var isDescriptionExpanded = false
+
+    #if os(tvOS)
+    @State private var isDescriptionScrollLocked = false
+    #endif
+
+    #if !os(tvOS)
+    @State private var downloadCoordinator = BatchDownloadCoordinator()
+    // Cache download state to avoid triggering @Observable tracking on every render.
+    // Prevents entire playlist view re-rendering when download progress updates.
+    @State private var cachedAllVideosDownloaded = false
+    @State private var hasLoadedDownloadState = false
+    #endif
+
+    @State private var watchEntriesMap: [String: WatchEntry] = [:]
+
+    private var dataManager: DataManager? { appEnvironment?.dataManager }
+    private var isQueueEnabled: Bool { appEnvironment?.settingsManager.queueEnabled ?? true }
+
+    private var isLocal: Bool {
+        if case .local = source { return true }
+        return false
+    }
+
+    /// The server-side id of the playlist on screen, if it has one.
+    private var remotePlaylistID: String? {
+        if case .remote(let playlistID, _, _, _) = source { return playlistID.playlistID }
+        return nil
+    }
+
+    /// Whether this playlist is one the resolved account may change.
+    ///
+    /// `entries != nil` is part of the answer on purpose: the edit affordances
+    /// are only ever offered over the authenticated snapshot, never over a
+    /// public fetch that happens to be of an owned playlist. Account *status*
+    /// deliberately is not — a stale "rejected" would hide the affordances from
+    /// an account that works, and a failed write says so with a toast.
+    private var canEditRemotePlaylist: Bool {
+        guard case .remote = source, entries != nil, let owningAccount else { return false }
+        return appEnvironment?.accountsManager.capabilities(for: owningAccount)?.supportsPlaylistWrites == true
+    }
+
+    /// Whether the owning account's backend has a visibility setting at all.
+    private var remoteSupportsPrivacy: Bool {
+        guard let owningAccount else { return false }
+        return appEnvironment?.accountsManager.capabilities(for: owningAccount)?.supportsPlaylistPrivacy == true
+    }
+
+    /// The playlist's visibility, as far as the server said it.
+    ///
+    /// Invidious answers with a single "listed" flag, so `true` is exactly
+    /// public and `false` is unlisted *or* private with no way to tell which.
+    /// The form starts the picker at the conservative reading of `false` and
+    /// only sends a visibility the user actually chose, so the ambiguity never
+    /// turns into a change nobody asked for.
+    private var knownRemotePrivacy: PlaylistPrivacy? {
+        guard let remoteIsListed else { return nil }
+        return remoteIsListed ? .public : .private
+    }
+
+    /// Deleting a server-side playlist takes it off the server, which is a very
+    /// different sentence from deleting a local one.
+    ///
+    /// Both name the playlist, and both fall back to the unnamed wording while
+    /// there is no name yet to say.
+    private var deleteConfirmationTitle: String {
+        let name = title.isEmpty ? cachedHeader?.title ?? "" : title
+
+        guard !name.isEmpty else {
+            return isLocal
+                ? String(localized: "playlist.delete.confirm")
+                : String(localized: "playlist.remote.delete.confirm")
+        }
+
+        return isLocal
+            ? String(localized: "playlist.delete.confirm.named \(name)")
+            : String(localized: "playlist.remote.delete.confirm.named \(name)")
+    }
+
+    private var navigationTitleText: String {
+        title.isEmpty ? cachedHeader?.title ?? String(localized: "playlist.title") : title
+    }
+
+    private var navigationThumbnailURL: URL? {
+        // Rendered as a single URL without fallback, so rewrite to the
+        // always-available hqdefault variant.
+        Thumbnail.reliableURL(for: videos.first?.bestThumbnail?.url ?? thumbnailURL ?? cachedHeader?.thumbnailURL)
+    }
+
+    /// Summary text for the playlist (e.g., "5 videos · 1h 23m").
+    private var playlistSummaryText: String? {
+        var parts: [String] = []
+
+        if videoCount > 0 || !isLoading {
+            parts.append(String(localized: "playlist.videoCount \(videoCount)"))
+        }
+
+        if let localPlaylist {
+            parts.append(localPlaylist.formattedTotalDuration)
+        }
+
+        // Return placeholder while loading to prevent navigation subtitle jump
+        if parts.isEmpty && isLoading {
+            return String(localized: "common.loading")
+        }
+
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    // MARK: - Body
+
+    var body: some View {
+        Group {
+            if !title.isEmpty || localPlaylist != nil {
+                playlistContent
+            } else if case .remote = source, isLoading, let cachedHeader {
+                // Show header with cached data + spinner for video list
+                loadingContent(cachedHeader)
+            } else if case .remote = source, isLoading {
+                loadingSpinner
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = errorMessage {
+                errorView(error)
+            } else {
+                notFoundView
+            }
+        }
+        #if !os(tvOS)
+        .navigationTitle(navigationTitleText)
+        .toolbarTitleDisplayMode(.inlineLarge)
+        .navigationSubtitleIfAvailable(playlistSummaryText)
+        #endif
+        #if os(macOS)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                macOSNavigationTitle
+            }
+        }
+        #endif
+        .sheet(isPresented: $showingEditSheet) {
+            if let localPlaylist {
+                PlaylistFormSheet(mode: .edit(localPlaylist)) { newTitle, newDescription in
+                    dataManager?.updatePlaylist(localPlaylist, title: newTitle, description: newDescription)
+                    loadLocalPlaylist()
+                }
+            } else if canEditRemotePlaylist {
+                PlaylistFormSheet(
+                    mode: .editRemote(
+                        title: title,
+                        description: descriptionText,
+                        privacy: knownRemotePrivacy
+                    ),
+                    showsPrivacy: remoteSupportsPrivacy
+                ) { newTitle, newDescription, newPrivacy in
+                    Task {
+                        await saveRemoteEdit(title: newTitle, description: newDescription, privacy: newPrivacy)
+                    }
+                }
+            }
+        }
+        // One dialog for both kinds of playlist: two of them attached to the
+        // same view compete over which is presented.
+        .confirmationDialog(
+            deleteConfirmationTitle,
+            isPresented: $showingDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(String(localized: "common.delete"), role: .destructive) {
+                if let localPlaylist {
+                    // Let go of the model *before* deleting it: dismissal is
+                    // animated, so this view renders at least once more, and
+                    // reading a deleted model — the duration in the subtitle is
+                    // enough — traps in SwiftData with "context is missing".
+                    self.localPlaylist = nil
+                    dataManager?.deletePlaylist(localPlaylist)
+                    dismiss()
+                } else {
+                    Task { await deleteRemotePlaylist() }
+                }
+            }
+        }
+        .presentationCompactAdaptation(.sheet)
+        .task {
+            await loadPlaylist()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .watchHistoryDidChange)) { _ in
+            loadWatchEntries()
+        }
+        // Signing in again keeps the account, the source and usually the status,
+        // so nothing else this view watches would move — but the login behind an
+        // account-loaded playlist may now be somebody else.
+        .onReceive(NotificationCenter.default.publisher(for: .accountCredentialDidChange)) { _ in
+            discardAccountLoadedContentAndReload()
+        }
+        // The same, for a change of Apple account: every credential on the
+        // device belongs to an identity, and this one's are no longer readable.
+        .onReceive(NotificationCenter.default.publisher(for: .credentialIdentityScopeDidChange)) { _ in
+            discardAccountLoadedContentAndReload()
+        }
+        #if !os(tvOS)
+        .batchDownload(coordinator: downloadCoordinator)
+        .onAppear {
+            downloadCoordinator.setEnvironment(appEnvironment)
+            loadDownloadStateIfNeeded()
+        }
+        .onChange(of: videos) { _, _ in
+            // Update cache when videos change (e.g., after loading)
+            updateAllVideosDownloadedCache()
+        }
+        #endif
+    }
+
+    // MARK: - Content
+
+    #if os(macOS)
+    private var macOSNavigationTitle: some View {
+        HStack(spacing: 8) {
+            LazyImage(url: navigationThumbnailURL) { state in
+                if let image = state.image {
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(.quaternary)
+                        .overlay {
+                            Image(systemName: "list.bullet.rectangle")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                }
+            }
+            .frame(width: 26, height: 15)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+            .accessibilityHidden(true)
+
+            Text(navigationTitleText)
+                .font(.headline)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+    }
+    #endif
+
+    @ViewBuilder
+    private var playlistContent: some View {
+        #if os(tvOS)
+        tvOSTwoColumnContent
+        #else
+        scrollablePlaylistContent()
+        #endif
+    }
+
+    @ViewBuilder
+    private func scrollablePlaylistContent() -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                playlistHeader()
+
+                Divider()
+                    .padding(.horizontal)
+
+                playlistBody
+            }
+        }
+        .refreshable {
+            if case .remote = source {
+                await loadPlaylist()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var playlistBody: some View {
+        if videos.isEmpty {
+            if isLoading {
+                loadingSpinner
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+            } else if let errorMessage {
+                // A remote playlist arrives with its title, so a failed load
+                // lands in playlistContent rather than the body's error branch.
+                errorView(errorMessage)
+                    .padding(.top, 40)
+            } else {
+                emptyPlaylistView
+            }
+        } else {
+            videoList
+        }
+    }
+
+    /// On tvOS a remote playlist this account does not own has no other
+    /// focusable element while it loads, and as a sidebar playlist it is a tab
+    /// root that cannot be popped — so Cancel lands on the error and its Retry.
+    private var loadingSpinner: some View {
+        ProgressView()
+            #if os(tvOS)
+            .tvStalledLoadCancel {
+                isLoading = false
+                errorMessage = String(localized: "common.loadingStopped")
+            }
+            #endif
+    }
+
+    /// Shows cached header with a spinner below while loading full playlist data.
+    private func loadingContent(_ cached: CachedPlaylistHeader) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                playlistHeader(
+                    thumbnailURL: cached.thumbnailURL,
+                    videoCount: cached.videoCount
+                )
+
+                Divider()
+                    .padding(.horizontal)
+
+                // Centered spinner for content area
+                loadingSpinner
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+            }
+        }
+    }
+
+    private func playlistHeader() -> some View {
+        playlistHeader(
+            thumbnailURL: thumbnailURL,
+            videoCount: videoCount,
+            localPlaylist: localPlaylist,
+            descriptionText: descriptionText
+        )
+    }
+
+    private func playlistHeader(
+        thumbnailURL: URL?,
+        videoCount: Int,
+        localPlaylist: LocalPlaylist? = nil,
+        descriptionText: String? = nil
+    ) -> some View {
+        // Build summary text for this header instance
+        let summaryText: String? = {
+            var parts: [String] = []
+            if videoCount > 0 || !isLoading {
+                parts.append(String(localized: "playlist.videoCount \(videoCount)"))
+            }
+            if let localPlaylist {
+                parts.append(localPlaylist.formattedTotalDuration)
+            }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        }()
+
+        return VStack(alignment: .leading, spacing: 12) {
+            // Summary info (only shown on pre-iOS 26, or non-iOS platforms)
+            #if os(iOS)
+            if #unavailable(iOS 26) {
+                if let summaryText {
+                    Text(summaryText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            #elseif os(macOS)
+            if let summaryText {
+                Text(summaryText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            #endif
+
+            // Description (full width, expandable)
+            if let descriptionText, !descriptionText.isEmpty {
+                ExpandableText(text: descriptionText, lineLimit: 2, isExpanded: $isDescriptionExpanded)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Action buttons row (iOS/macOS only).
+            //
+            // An owned playlist keeps its row after the last video is removed:
+            // renaming and deleting it are the only things left to do with it,
+            // and the row is where both live.
+            #if !os(tvOS)
+            if !videos.isEmpty || localPlaylist != nil || canEditRemotePlaylist {
+                playlistActionButtons
+            }
+            #endif
+        }
+        .padding()
+    }
+
+    // MARK: - Action Buttons Row
+
+    #if !os(tvOS)
+    @ViewBuilder
+    private var playlistActionButtons: some View {
+        HStack(spacing: 12) {
+            // Playing and downloading need videos to act on; the menu does not.
+            if !videos.isEmpty {
+                // Play button (only when queue is enabled)
+                if isQueueEnabled {
+                    Button {
+                        playAll()
+                    } label: {
+                        Label(String(localized: "playlist.play"), systemImage: "play.fill")
+                            .fontWeight(.semibold)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                // Download button with three states
+                if downloadCoordinator.isDownloading {
+                    Button {
+                        // No action while downloading
+                    } label: {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .controlSize(.small)
+                            if let progress = downloadCoordinator.progress {
+                                Text("\(progress.current)/\(progress.total)")
+                                    .monospacedDigit()
+                            }
+                        }
+                    }
+                    .fontWeight(.semibold)
+                    .buttonStyle(.bordered)
+                    .disabled(true)
+                } else if cachedAllVideosDownloaded {
+                    Button {
+                        // No action - already downloaded
+                    } label: {
+                        Label(String(localized: "playlist.downloaded"), systemImage: "checkmark.circle.fill")
+                    }
+                    .fontWeight(.semibold)
+                    .buttonStyle(.bordered)
+                    .disabled(true)
+                } else {
+                    Button {
+                        downloadCoordinator.startDownload(videos: videos)
+                    } label: {
+                        Label(String(localized: "playlist.downloadAll"), systemImage: "arrow.down.circle")
+                    }
+                    .fontWeight(.semibold)
+                    .buttonStyle(.bordered)
+                }
+            }
+
+            Spacer()
+
+            // Menu button (circular with glass background)
+            Menu {
+                // Remote-only: Save to Library, Share
+                if case .remote = source, let remotePlaylist, !remotePlaylist.isLocal {
+                    // Nothing to copy out of an empty playlist.
+                    if !videos.isEmpty {
+                        Button {
+                            Task { await importToLocal() }
+                        } label: {
+                            if isImporting, let progress = importProgress {
+                                Label(String(localized: "playlist.savingToLibrary \(progress.current) \(progress.total)"), systemImage: "plus.rectangle.on.folder")
+                            } else {
+                                Label(String(localized: "playlist.saveToLibrary"), systemImage: "plus.rectangle.on.folder")
+                            }
+                        }
+                        .disabled(isImporting)
+                    }
+
+                    ShareLink(item: playlistShareURL()) {
+                        Label(String(localized: "common.share"), systemImage: "square.and.arrow.up")
+                    }
+                }
+
+                // Edit and Delete: local playlists, and server-side ones this
+                // account owns.
+                if (isLocal && localPlaylist != nil) || canEditRemotePlaylist {
+                    Button {
+                        beginEdit()
+                    } label: {
+                        Label(String(localized: "playlist.edit"), systemImage: "pencil")
+                    }
+                    .disabled(isPreparingEdit)
+
+                    Button(role: .destructive) {
+                        showingDeleteConfirmation = true
+                    } label: {
+                        Label(String(localized: "playlist.delete"), systemImage: "trash")
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.body.weight(.medium))
+                    .frame(width: 44, height: 44)
+                    .background(.regularMaterial, in: Circle())
+            }
+            .menuIndicator(.hidden)
+            #if os(macOS)
+            // The default macOS menu style renders as a bordered pull-down that
+            // stretches to fill available width on macOS 15 (Sequoia).
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            #endif
+        }
+        .padding(.top, 8)
+    }
+    #endif
+
+    // MARK: - tvOS Two-Column Layout
+
+    #if os(tvOS)
+    @ViewBuilder
+    private var tvOSTwoColumnContent: some View {
+        GeometryReader { geometry in
+            let leftWidth = geometry.size.width * 0.30
+            HStack(alignment: .top, spacing: 40) {
+                tvOSLeftColumn
+                    .frame(width: leftWidth, alignment: .leading)
+                    .focusSection()
+
+                tvOSRightColumn
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .focusSection()
+            }
+            .padding(.horizontal, 60)
+            .padding(.vertical, 40)
+        }
+    }
+
+    @ViewBuilder
+    private var tvOSLeftColumn: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            tvOSPlaylistThumbnail
+                .frame(maxWidth: .infinity)
+
+            if !title.isEmpty {
+                Text(title)
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.white)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let summaryText = playlistSummaryText {
+                Text(summaryText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            // An owned playlist keeps its buttons after the last video is
+            // removed: editing and deleting are all that is left to do with it.
+            if !isDescriptionScrollLocked, !videos.isEmpty || localPlaylist != nil || canEditRemotePlaylist {
+                tvOSPlaylistActionButtons
+            }
+
+            if let descriptionText, !descriptionText.isEmpty {
+                TVScrollableDescription(
+                    description: descriptionText,
+                    isScrollLocked: $isDescriptionScrollLocked,
+                    showsHeader: false
+                )
+                .frame(maxHeight: .infinity)
+            } else {
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(.vertical, 8)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .animation(.easeInOut(duration: 0.25), value: isDescriptionScrollLocked)
+    }
+
+    @ViewBuilder
+    private var tvOSPlaylistThumbnail: some View {
+        let urls = (videos.first?.thumbnailURLsByQuality ?? [])
+            + [Thumbnail.reliableURL(for: thumbnailURL)].compactMap { $0 }
+        FallbackLazyImage(urls: urls) { state in
+            if let image = state.image {
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            } else {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Image(systemName: "music.note.list")
+                            .font(.system(size: 56, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+            }
+        }
+        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.4), radius: 10, y: 5)
+    }
+
+    @ViewBuilder
+    private var tvOSRightColumn: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                playlistBody
+            }
+            .padding(.vertical, 20)
+        }
+        .scrollClipDisabled()
+    }
+
+    @ViewBuilder
+    private var tvOSPlaylistActionButtons: some View {
+        VStack(spacing: 12) {
+            // Play (only when queue is enabled, and only with something to play)
+            if isQueueEnabled, !videos.isEmpty {
+                Button {
+                    playAll()
+                } label: {
+                    Label(String(localized: "playlist.play"), systemImage: "play.fill")
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .font(.headline)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            // Remote-only: Save to Library
+            if case .remote = source, let remotePlaylist, !remotePlaylist.isLocal, !videos.isEmpty {
+                Button {
+                    Task { await importToLocal() }
+                } label: {
+                    Group {
+                        if isImporting, let progress = importProgress {
+                            Label(String(localized: "playlist.savingToLibrary \(progress.current) \(progress.total)"), systemImage: "plus.rectangle.on.folder")
+                        } else {
+                            Label(String(localized: "playlist.saveToLibrary"), systemImage: "plus.rectangle.on.folder")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .font(.headline)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isImporting)
+            }
+
+            // Edit and Delete: local playlists, and server-side ones this
+            // account owns.
+            if (isLocal && localPlaylist != nil) || canEditRemotePlaylist {
+                Button {
+                    beginEdit()
+                } label: {
+                    Group {
+                        if isPreparingEdit {
+                            ProgressView()
+                        } else {
+                            Label(String(localized: "playlist.edit"), systemImage: "pencil")
+                        }
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .font(.headline)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isPreparingEdit)
+
+                Button {
+                    showingDeleteConfirmation = true
+                } label: {
+                    Label(String(localized: "playlist.delete"), systemImage: "trash")
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .font(.headline)
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+    }
+    #endif
+
+    #if !os(tvOS)
+    /// Loads download state once on appear to avoid continuous re-renders from @Observable.
+    private func loadDownloadStateIfNeeded() {
+        guard !hasLoadedDownloadState else { return }
+        hasLoadedDownloadState = true
+        updateAllVideosDownloadedCache()
+    }
+
+    /// Updates the cached allVideosDownloaded state.
+    /// Called on appear and when videos array changes.
+    private func updateAllVideosDownloadedCache() {
+        guard let downloadManager = appEnvironment?.downloadManager else {
+            cachedAllVideosDownloaded = false
+            return
+        }
+        cachedAllVideosDownloaded = videos.allSatisfy { video in
+            downloadManager.downloadedVideoIDs.contains(video.id) ||
+            downloadManager.downloadingVideoIDs.contains(video.id)
+        }
+    }
+    #endif
+
+    private var emptyPlaylistView: some View {
+        ContentUnavailableView {
+            Label(String(localized: "playlist.empty"), systemImage: "music.note.list")
+        } description: {
+            Text(String(localized: "playlist.empty.description"))
+        } actions: {
+            #if os(tvOS)
+            // The left column has no buttons for an empty remote playlist this
+            // account does not own; without one the remote has nowhere to go.
+            if case .remote = source {
+                Button(String(localized: "common.refresh")) {
+                    Task { await loadPlaylist() }
+                }
+            }
+            #endif
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.top, 40)
+    }
+
+    private var notFoundView: some View {
+        ContentUnavailableView {
+            Label(String(localized: "playlist.notFound"), systemImage: "list.bullet.rectangle")
+        } description: {
+            Text(String(localized: "playlist.notFound.description"))
+        } actions: {
+            #if os(tvOS)
+            // Nothing else on this screen is focusable, and as a sidebar
+            // playlist it is a tab root that Menu cannot pop.
+            if case .remote = source {
+                Button(String(localized: "common.retry")) {
+                    Task { await loadPlaylist() }
+                }
+            } else {
+                Button(String(localized: "playlist.notFound.openPlaylists")) {
+                    appEnvironment?.navigationCoordinator.router.select(.playlistsList)
+                }
+            }
+            #endif
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var videoList: some View {
+        #if os(tvOS)
+        let indexColumnWidth: CGFloat = 60
+        #else
+        let indexColumnWidth: CGFloat = 32
+        #endif
+        return LazyVStack(spacing: 0) {
+            // Keyed by row rather than by video: a playlist may hold the same
+            // video twice, and two rows sharing an identity leave SwiftUI free
+            // to pair a row's view with the other one's index — which is what
+            // the removal closure is addressed by.
+            ForEach(Array(videos.enumerated()), id: \.offset) { index, video in
+                VideoListRow(
+                    isLast: index == videos.count - 1,
+                    rowStyle: .regular,
+                    listStyle: .plain,
+                    indexWidth: indexColumnWidth  // Index column width in VideoRowView
+                ) {
+                    Button {
+                        playFromIndex(index)
+                    } label: {
+                        PlaylistVideoRowView(
+                            index: index + 1,
+                            video: video,
+                            watchProgress: watchProgress(for: video),
+                            onRemove: removeAction(forRow: index)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    // MARK: - Error View
+
+    private func errorView(_ error: String) -> some View {
+        ContentUnavailableView {
+            Label(String(localized: "common.error"), systemImage: "exclamationmark.triangle")
+        } description: {
+            Text(error)
+        } actions: {
+            Button(String(localized: "common.retry")) {
+                Task { await loadPlaylist() }
+            }
+            .buttonStyle(.bordered)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Data Loading
+
+    private func loadPlaylist() async {
+        switch source {
+        case .local:
+            loadLocalPlaylist()
+        case .remote(let playlistID, let instance, _, _):
+            await loadRemotePlaylist(playlistID: playlistID, instance: instance)
+        }
+        loadWatchEntries()
+    }
+
+    /// Throws away everything an account fetched here, and loads again.
+    ///
+    /// Cleared first and synchronously, because the reload awaits a server:
+    /// until it answers, a playlist that may be private would otherwise still
+    /// be on screen — with its rows, its title and its destructive affordances
+    /// — under a credential that no longer belongs to the person who fetched
+    /// it. The reload resolves ownership again from scratch, and falls back to
+    /// the public endpoint when the account can no longer read the playlist.
+    ///
+    /// Only for a playlist an account loaded: a public one shows nothing that
+    /// a login could make private, and reloading it would be a flash for
+    /// nothing.
+    ///
+    /// `wasAccountLoaded` rather than only what is on screen now: these
+    /// notifications come in pairs — the credentials become unreadable, then
+    /// readable again — and the first one is what clears `entries` and
+    /// `owningAccount`. Asking only about those would take the discard and skip
+    /// the recovery, leaving the view on whatever the unreadable window
+    /// produced until the user reloads it by hand.
+    private func discardAccountLoadedContentAndReload() {
+        guard case .remote = source,
+              entries != nil || owningAccount != nil || wasAccountLoaded
+        else { return }
+
+        // Bumped here rather than only in the reload it starts: the load being
+        // superseded has to stop counting at the moment its content is thrown
+        // away, not whenever the replacement gets around to running.
+        loadGeneration += 1
+
+        entries = nil
+        entriesByRow = [:]
+        owningAccount = nil
+        remoteIsListed = nil
+        remotePlaylist = nil
+        title = ""
+        descriptionText = nil
+        thumbnailURL = nil
+        videos = []
+        videoCount = 0
+        errorMessage = nil
+        isLoading = true
+
+        Task { await loadPlaylist() }
+    }
+
+    private func loadWatchEntries() {
+        watchEntriesMap = dataManager?.watchEntriesMap() ?? [:]
+    }
+
+    private func watchProgress(for video: Video) -> Double? {
+        guard let entry = watchEntriesMap[video.id.videoID] else { return nil }
+        let progress = entry.progress
+        return progress > 0 && progress < 1 ? progress : nil
+    }
+
+    private func loadLocalPlaylist() {
+        guard case .local(let uuid, _) = source else { return }
+
+        localPlaylist = dataManager?.playlists().first { $0.id == uuid }
+
+        if let playlist = localPlaylist {
+            title = playlist.title
+            descriptionText = playlist.playlistDescription
+            thumbnailURL = playlist.thumbnailURL
+            videos = playlist.sortedItems.map { $0.toVideo() }
+            videoCount = playlist.videoCount
+        }
+
+        isLoading = false
+    }
+
+    private func loadRemotePlaylist(playlistID: PlaylistID, instance: Instance?) async {
+        // Every load supersedes the ones before it — pull to refresh and retry
+        // as much as a credential change. Taken before the first suspension, so
+        // an older task can never claim it.
+        loadGeneration += 1
+        let generation = loadGeneration
+
+        guard let appEnvironment else {
+            errorMessage = "App not initialized"
+            isLoading = false
+            return
+        }
+
+        // Use passed instance, or find appropriate one based on source
+        let targetInstance: Instance?
+        if let instance {
+            targetInstance = instance
+        } else if let accountInstance = instanceForOpeningAccount() {
+            // The account the playlist was opened as names the server it lives
+            // on, and it says so with more authority than any guess from the
+            // id: a Piped playlist is `.global` like any other, so the guess
+            // below would land on an Invidious instance and the ownership check
+            // would then throw away the very account that can read it.
+            targetInstance = accountInstance
+        } else if let playlistSource = playlistID.source {
+            targetInstance = instanceForSource(playlistSource, instancesManager: appEnvironment.instancesManager)
+        } else {
+            targetInstance = appEnvironment.instancesManager.activeInstance
+        }
+
+        guard let resolvedInstance = targetInstance else {
+            errorMessage = "No instance available"
+            isLoading = false
+            return
+        }
+
+        isLoading = true
+        errorMessage = nil
+
+        // Load cached header data for immediate display
+        if let recentPlaylist = appEnvironment.dataManager.recentPlaylistEntry(forPlaylistID: playlistID.playlistID) {
+            cachedHeader = CachedPlaylistHeader(from: recentPlaylist)
+        }
+
+        // Whose playlist this is decides which endpoint can see it: the account
+        // reads its own, everybody else reads the public one. Resolved every
+        // load rather than once, because signing in or out changes the answer
+        // without the source ever changing.
+        let account = resolveOwningAccount(playlistID: playlistID, instance: resolvedInstance)
+        owningAccount = account
+
+        // "Nobody can be named right now" is not the answer "nobody owns it".
+        // While the identity scope is unresolved the account list is empty —
+        // and it drops to unresolved and comes back on its own, on every
+        // activation with iCloud Drive off. Reading an account's playlist from
+        // the public endpoint in that window is not a fallback but a wrong
+        // answer: Invidious replies 404 "Playlist does not exist." to an
+        // unauthenticated read of a *private* playlist, so a playlist that was
+        // on screen a moment ago is reported as gone. Nothing is read until the
+        // scope comes back, which reloads this view.
+        if account == nil, wasAccountLoaded, !appEnvironment.credentialIdentityScope.isResolved {
+            return
+        }
+
+        do {
+            let fetchedPlaylist: Playlist
+
+            if let account,
+               appEnvironment.accountsManager.capabilities(for: account)?.supportsPlaylistReads == true {
+                // The authenticated fetch is the only one that can see a
+                // private playlist — and the only one that names the rows, so
+                // it is also what makes the playlist editable at all.
+                wasAccountLoaded = true
+
+                try await appEnvironment.remotePlaylistsCache.refreshSnapshot(
+                    id: playlistID.playlistID,
+                    for: account
+                )
+
+                guard generation == loadGeneration else { return }
+
+                guard let snapshot = appEnvironment.remotePlaylistsCache.snapshot(
+                    id: playlistID.playlistID,
+                    for: account.id
+                ) else {
+                    // The account was cleared while this was in flight and its
+                    // data went with it. Nothing to show, and nothing to say
+                    // that whatever cleared it is not already saying.
+                    isLoading = false
+                    return
+                }
+
+                apply(snapshot)
+                fetchedPlaylist = snapshot.playlist
+            } else {
+                // Public endpoint: no account, no row identities, no editing.
+                entries = nil
+                entriesByRow = [:]
+
+                fetchedPlaylist = try await appEnvironment.contentService.playlist(
+                    id: playlistID.playlistID,
+                    instance: resolvedInstance
+                )
+
+                guard generation == loadGeneration else { return }
+
+                apply(fetchedPlaylist)
+            }
+
+            // Save to recent playlists (only remote playlists, unless incognito mode is enabled or recent playlists disabled)
+            if appEnvironment.settingsManager.incognitoModeEnabled != true,
+               appEnvironment.settingsManager.saveRecentPlaylists {
+                appEnvironment.dataManager.addRecentPlaylist(fetchedPlaylist)
+            }
+        } catch {
+            guard generation == loadGeneration else { return }
+
+            errorMessage = error.localizedDescription
+        }
+
+        guard generation == loadGeneration else { return }
+
+        isLoading = false
+    }
+
+    /// The instance of the account the playlist was opened as, when the place
+    /// it was opened from named one and this device still has it.
+    private func instanceForOpeningAccount() -> Instance? {
+        guard let appEnvironment,
+              let accountID = source.accountID,
+              let account = appEnvironment.accountsManager.account(id: accountID)
+        else { return nil }
+
+        return appEnvironment.accountsManager.instance(for: account)
+    }
+
+    /// The account whose playlist this is, or `nil` when it is nobody's.
+    ///
+    /// The id passed in with the source is the reliable answer — the place the
+    /// playlist was opened from knew whose list it came out of. Failing that,
+    /// only Invidious leaves a trace: `IVPL` ids are user playlists, so a
+    /// signed-in account on that instance is very probably the owner. Piped ids
+    /// say nothing at all, which is why the accountID exists.
+    private func resolveOwningAccount(playlistID: PlaylistID, instance: Instance) -> Account? {
+        guard let appEnvironment else { return nil }
+
+        // Only if that account is on *this* instance. An id that came in over
+        // Handoff was minted on another device, where it may name an account
+        // this one has on a different server entirely — and resolving it would
+        // send the authenticated fetch somewhere the playlist does not live,
+        // with a credential that has nothing to do with it.
+        if let accountID = source.accountID,
+           let account = appEnvironment.accountsManager.account(id: accountID),
+           appEnvironment.accountsManager.instance(for: account)?.id == instance.id {
+            return account
+        }
+
+        guard instance.type == .invidious, playlistID.playlistID.hasPrefix("IVPL") else { return nil }
+        return appEnvironment.account(forInstance: instance)
+    }
+
+    /// Shows a playlist that came from the public endpoint.
+    private func apply(_ playlist: Playlist) {
+        // A load the user stopped on tvOS may still land; the playlist it
+        // brings replaces the "stopped" error.
+        errorMessage = nil
+        remotePlaylist = playlist
+        title = playlist.title
+        descriptionText = playlist.description
+        thumbnailURL = playlist.thumbnailURL
+        videos = playlist.videos
+        videoCount = playlist.videoCount
+    }
+
+    /// Shows a playlist the account fetched, together with the rows it may
+    /// address.
+    private func apply(_ snapshot: RemotePlaylistSnapshot) {
+        apply(snapshot.playlist)
+        entries = snapshot.entries
+        entriesByRow = Self.rowEntries(for: snapshot)
+        remoteIsListed = snapshot.isListed
+    }
+
+    /// Pairs each displayed row with the entry that can name it to the server.
+    ///
+    /// The correspondence is the one the snapshot builder recorded, not one
+    /// recovered here: `entries` is a *subsequence* of the playlist's videos —
+    /// a row the server refused to hand an identity to is still displayed, it
+    /// just cannot be a target — and matching the two lists back up by video id
+    /// cannot tell two rows of the same video apart, so a duplicate row without
+    /// an identity would steal its twin's entry and remove the wrong one.
+    private static func rowEntries(for snapshot: RemotePlaylistSnapshot) -> [Int: RemotePlaylistEntry] {
+        let rowCount = snapshot.playlist.videos.count
+        var map: [Int: RemotePlaylistEntry] = [:]
+
+        for entry in snapshot.entries where entry.displayRow >= 0 && entry.displayRow < rowCount {
+            map[entry.displayRow] = entry
+        }
+
+        return map
+    }
+
+    /// Returns the appropriate instance for the playlist's content source.
+    private func instanceForSource(_ source: ContentSource, instancesManager: InstancesManager) -> Instance? {
+        instancesManager.playlistInstance(for: source)
+    }
+
+    // MARK: - Playback Actions
+
+    private func playFromIndex(_ index: Int) {
+        guard let appEnvironment else { return }
+
+        appEnvironment.queueManager.playFromList(
+            videos: videos,
+            index: index,
+            queueSource: queueSource,
+            sourceLabel: title
+        )
+    }
+
+    private func playAll() {
+        guard !videos.isEmpty, let appEnvironment else { return }
+
+        // In shuffle mode start from a random video (#988). Rotate rather than
+        // pick an index so every other video stays in the queue instead of
+        // being pushed to history as "already played".
+        var orderedVideos = videos
+        if appEnvironment.playerService.state.queueMode == .shuffle {
+            let start = Int.random(in: 0..<videos.count)
+            orderedVideos = Array(videos[start...] + videos[..<start])
+        }
+
+        appEnvironment.queueManager.playFromList(
+            videos: orderedVideos,
+            index: 0,
+            queueSource: queueSource,
+            sourceLabel: title
+        )
+    }
+
+    private var queueSource: QueueSource {
+        switch source {
+        case .local:
+            return .manual
+        case .remote(let playlistID, _, _, _):
+            return .playlist(playlistID: playlistID.playlistID, continuation: nil)
+        }
+    }
+
+    // MARK: - Local Playlist Actions
+
+    private func removeVideo(at index: Int) {
+        guard let localPlaylist else { return }
+        dataManager?.removeVideoFromPlaylist(at: index, playlist: localPlaylist)
+        loadLocalPlaylist()
+    }
+
+    // MARK: - Owned Remote Playlist Actions
+
+    /// The removal a row offers, or `nil` when it has none.
+    ///
+    /// Local rows always have one. A server-side row needs the account to own
+    /// the playlist *and* the server to have named the row in the snapshot —
+    /// a row it refused to name can never be the target of a removal.
+    private func removeAction(forRow index: Int) -> (() -> Void)? {
+        if isLocal {
+            return { removeVideo(at: index) }
+        }
+
+        guard canEditRemotePlaylist, let entry = entriesByRow[index] else { return nil }
+        return { Task { await removeRemoteEntry(entry) } }
+    }
+
+    private func removeRemoteEntry(_ entry: RemotePlaylistEntry) async {
+        guard let appEnvironment,
+              let account = owningAccount,
+              let playlistID = remotePlaylistID
+        else { return }
+
+        do {
+            try await appEnvironment.remotePlaylistsCache.removeEntry(
+                entry,
+                fromPlaylist: playlistID,
+                for: account
+            )
+            applyRefetchedSnapshot()
+        } catch AccountServiceError.entryMismatch {
+            // The row moved out from under the snapshot that named it. The
+            // cache has already refetched, so what is on screen after this is
+            // the playlist as it now stands.
+            applyRefetchedSnapshot()
+            appEnvironment.toastManager.showError(
+                String(localized: "playlist.remote.entryMismatch.title"),
+                subtitle: String(localized: "playlist.remote.entryMismatch.message")
+            )
+        } catch {
+            applyRefetchedSnapshot()
+            appEnvironment.toastManager.showError(
+                String(localized: "playlist.remote.remove.error"),
+                subtitle: error.localizedDescription
+            )
+        }
+    }
+
+    /// Opens the edit form — over the playlist as the server has it *now*, when
+    /// the playlist is one.
+    ///
+    /// The form saves every field at once, so an edit started from a snapshot
+    /// taken minutes ago would put that snapshot's title and description back
+    /// over anything another client changed since. A local playlist is the only
+    /// copy there is and needs none of this.
+    private func beginEdit() {
+        guard !isLocal else {
+            showingEditSheet = true
+            return
+        }
+        Task { await beginRemoteEdit() }
+    }
+
+    private func beginRemoteEdit() async {
+        guard let appEnvironment,
+              let account = owningAccount,
+              let playlistID = remotePlaylistID
+        else { return }
+
+        isPreparingEdit = true
+        defer { isPreparingEdit = false }
+
+        do {
+            try await appEnvironment.remotePlaylistsCache.refreshSnapshot(id: playlistID, for: account)
+
+            // Nothing came back to edit: the account was cleared while this was
+            // in flight and its data went with it, exactly as on load.
+            guard let snapshot = appEnvironment.remotePlaylistsCache.snapshot(
+                id: playlistID,
+                for: account.id
+            ) else { return }
+
+            apply(snapshot)
+            showingEditSheet = true
+        } catch {
+            // No sheet: editing from data known to be stale is the thing this
+            // refetch exists to prevent.
+            appEnvironment.toastManager.showError(
+                String(localized: "playlist.remote.refresh.error"),
+                subtitle: error.localizedDescription
+            )
+        }
+    }
+
+    private func saveRemoteEdit(title newTitle: String, description: String?, privacy: PlaylistPrivacy?) async {
+        guard let appEnvironment,
+              let account = owningAccount,
+              let playlistID = remotePlaylistID
+        else { return }
+
+        do {
+            try await appEnvironment.remotePlaylistsCache.updatePlaylist(
+                id: playlistID,
+                title: newTitle,
+                description: description,
+                privacy: privacy,
+                for: account
+            )
+            applyRefetchedSnapshot()
+        } catch {
+            // A half-applied edit is a real outcome on Piped, where the name and
+            // the description are two calls — the refetch is what says which
+            // half landed.
+            applyRefetchedSnapshot()
+            appEnvironment.toastManager.showError(
+                String(localized: "playlist.remote.edit.error"),
+                subtitle: error.localizedDescription
+            )
+        }
+    }
+
+    private func deleteRemotePlaylist() async {
+        guard let appEnvironment,
+              let account = owningAccount,
+              let playlistID = remotePlaylistID
+        else { return }
+
+        do {
+            try await appEnvironment.remotePlaylistsCache.deletePlaylist(id: playlistID, for: account)
+            dismiss()
+        } catch {
+            applyRefetchedSnapshot()
+            appEnvironment.toastManager.showError(
+                String(localized: "playlist.remote.delete.error"),
+                subtitle: error.localizedDescription
+            )
+        }
+    }
+
+    /// Re-reads whatever the cache's reconciling refetch left behind.
+    ///
+    /// Nothing here is edited optimistically: what the view shows after a change
+    /// is only ever what the server answered with — including after a failure,
+    /// because a write that reported one may still have landed.
+    ///
+    /// No snapshot left is an answer too: the refetch found the playlist gone
+    /// (a delete that reported a failure but landed), or the account it belonged
+    /// to was cleared. Either way there is nothing left to show or to edit, so
+    /// the view leaves exactly as it does after a delete that reported success.
+    private func applyRefetchedSnapshot() {
+        guard let appEnvironment,
+              let account = owningAccount,
+              let playlistID = remotePlaylistID
+        else { return }
+
+        guard let snapshot = appEnvironment.remotePlaylistsCache.snapshot(id: playlistID, for: account.id) else {
+            dismiss()
+            return
+        }
+
+        apply(snapshot)
+    }
+
+    // MARK: - Remote Playlist Actions
+
+    private func playlistShareURL() -> URL {
+        guard let remotePlaylist else {
+            return URL(string: "streamsnip://playlist")!
+        }
+
+        switch remotePlaylist.id.source {
+        case .global:
+            return URL(string: "https://youtube.com/playlist?list=\(remotePlaylist.id.playlistID)")!
+        case .federated(_, let instance):
+            return instance.appendingPathComponent("video-playlists/\(remotePlaylist.id.playlistID)")
+        case .extracted(_, let originalURL):
+            return originalURL
+        case nil:
+            return URL(string: "streamsnip://playlist/\(remotePlaylist.id.playlistID)")!
+        }
+    }
+
+    /// Imports the remote playlist to local storage.
+    private func importToLocal() async {
+        guard let appEnvironment, let remotePlaylist else { return }
+
+        isImporting = true
+        importProgress = nil
+
+        // Generate unique name
+        let uniqueName = appEnvironment.dataManager.uniquePlaylistTitle(remotePlaylist.title)
+
+        // Create local playlist
+        let newLocalPlaylist = appEnvironment.dataManager.createPlaylist(
+            title: uniqueName,
+            description: remotePlaylist.description
+        )
+
+        // Add videos
+        let total = videos.count
+
+        for (index, video) in videos.enumerated() {
+            importProgress = (current: index + 1, total: total)
+            appEnvironment.dataManager.addToPlaylist(video, playlist: newLocalPlaylist)
+
+            // Small delay to allow UI to update for larger playlists
+            if total > 10 {
+                try? await Task.sleep(for: .milliseconds(30))
+            }
+        }
+
+        isImporting = false
+        importProgress = nil
+
+        appEnvironment.toastManager.showSuccess(String(localized: "playlist.imported.title"))
+    }
+}
+
+// MARK: - Preview
+
+#Preview("Local Playlist") {
+    NavigationStack {
+        UnifiedPlaylistDetailView(source: .local(UUID()))
+    }
+    .appEnvironment(.preview)
+}
+
+#Preview("Remote Playlist") {
+    NavigationStack {
+        UnifiedPlaylistDetailView(source: .remote(.global("PLtest"), instance: nil))
+    }
+    .appEnvironment(.preview)
+}

@@ -18,7 +18,7 @@ module UITest
           return
         end
 
-        puts "Building Yattee for #{device}..."
+        puts "Building StreamSnip for #{device}..."
 
         args = [
           'xcodebuild',

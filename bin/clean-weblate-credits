@@ -17,7 +17,7 @@ require 'digest'
 # Change to project directory
 Dir.chdir(File.expand_path('..', __dir__))
 
-CREDITS_FILE = 'Yattee/weblate-credits.json'
+CREDITS_FILE = 'StreamSnip/weblate-credits.json'
 
 unless File.exist?(CREDITS_FILE)
   warn "Error: #{CREDITS_FILE} not found"

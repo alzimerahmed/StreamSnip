@@ -1,7 +1,7 @@
-# Yattee v2 Fastlane configuration
-# Single unified "Yattee" scheme, platform selected via destination parameter
+# StreamSnip v2 Fastlane configuration
+# Single unified "StreamSnip" scheme, platform selected via destination parameter
 
-APP_NAME = ENV['APP_NAME'] || 'Yattee'
+APP_NAME = ENV['APP_NAME'] || 'StreamSnip'
 DEVELOPER_KEY_ID = ENV['DEVELOPER_KEY_ID']
 DEVELOPER_KEY_ISSUER_ID = ENV['DEVELOPER_KEY_ISSUER_ID']
 DEVELOPER_KEY_CONTENT = ENV['DEVELOPER_KEY_CONTENT']
@@ -140,7 +140,7 @@ platform :ios do
       team_id: TEAM_ID,
       code_sign_identity: "Apple Distribution",
       profile_name: "match AppStore #{DEVELOPER_APP_IDENTIFIER}.ShareExtension",
-      targets: ["YatteeShareExtension"]
+      targets: ["StreamSnipShareExtension"]
     )
 
     build_app(
@@ -214,7 +214,7 @@ platform :tvos do
       team_id: TEAM_ID,
       code_sign_identity: "Apple Distribution",
       profile_name: "match AppStore #{DEVELOPER_APP_IDENTIFIER}.TopShelf tvos",
-      targets: ["YatteeTopShelf"]
+      targets: ["StreamSnipTopShelf"]
     )
 
     build_app(

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/yattee-logo.png" width="128" height="128" alt="StreamSnip logo (inherited from Yattee until rebrand)" />
+  <img src="assets/streamsnip-logo.png" width="128" height="128" alt="StreamSnip logo (inherited from Yattee pending new artwork)" />
   <h1>StreamSnip</h1>
   <p>Privacy oriented video player for iOS, tvOS and macOS<br /></p>
 
@@ -14,13 +14,13 @@
 * Player component with custom controls, gestures and support for 4K playback
 * Fullscreen, Picture in Picture and background audio playback
 * [SponsorBlock](https://sponsor.ajay.app/), configurable categories to skip
-* Automation with the `yattee://` URL scheme, x-callback-url, Shortcuts and Siri
+* Automation with the `streamsnip://` URL scheme, x-callback-url, Shortcuts and Siri
 * Optional self-hosted backend via [Yattee Server](https://github.com/yattee/yattee-server) — powered by yt-dlp, supports 1000+ sites
 
 ## Fork
 
-StreamSnip is a fork of [Yattee](https://github.com/yattee/yattee) (fork base `main@03599d3`), licensed under AGPL-3.0. All credit for the original project and its design goes to the Yattee authors and contributors. The upstream logo and `yattee://` URL scheme are still in use pending the planned rebrand.
+StreamSnip is a fork of [Yattee](https://github.com/yattee/yattee) (fork base `main@03599d3`), licensed under AGPL-3.0. All credit for the original project and its design goes to the Yattee authors and contributors. The upstream logo artwork is still in use pending new StreamSnip artwork.
 
 ## License
 
-Yattee and its components are shared under the [AGPL v3](https://www.gnu.org/licenses/agpl-3.0.en.html) license.
+StreamSnip and its components are shared under the [AGPL v3](https://www.gnu.org/licenses/agpl-3.0.en.html) license.

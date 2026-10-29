@@ -43,7 +43,7 @@ RSpec.configure do |config|
   config.before(:suite) do
     puts ''
     puts '=' * 60
-    puts 'Yattee UI Tests'
+    puts 'StreamSnip UI Tests'
     puts '=' * 60
     puts "Device: #{UITest::Config.device}"
     puts "Generate baseline: #{UITest::Config.generate_baseline?}"

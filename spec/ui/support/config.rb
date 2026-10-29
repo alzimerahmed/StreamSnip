@@ -59,7 +59,7 @@ module UITest
 
       # App bundle identifier
       def bundle_id
-        'stream.yattee.app'
+        'com.alzimerahmed.StreamSnip'
       end
 
       # Yattee Server URL for testing (configurable via env; no default — set your own instance)
@@ -184,12 +184,12 @@ module UITest
 
       # Xcode project file
       def xcodeproj
-        File.join(project_path, 'Yattee.xcodeproj')
+        File.join(project_path, 'StreamSnip.xcodeproj')
       end
 
       # Scheme to build
       def scheme
-        'Yattee'
+        'StreamSnip'
       end
 
       # Build configuration
@@ -204,7 +204,7 @@ module UITest
 
       # Path to built app
       def app_path
-        File.join(derived_data_path, 'Build', 'Products', 'Debug-iphonesimulator', 'Yattee.app')
+        File.join(derived_data_path, 'Build', 'Products', 'Debug-iphonesimulator', 'StreamSnip.app')
       end
 
       # Spec root directory

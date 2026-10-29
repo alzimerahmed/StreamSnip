@@ -7,7 +7,7 @@
 #
 # Usage:
 #   update_appcast.rb \
-#     --zip <path-to-Yattee-X.Y.Z-macOS.zip> \
+#     --zip <path-to-StreamSnip-X.Y.Z-macOS.zip> \
 #     --version 2.0.1 \
 #     --build 260 \
 #     --channel stable|beta \
