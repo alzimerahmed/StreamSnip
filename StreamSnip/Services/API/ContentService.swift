@@ -29,6 +29,12 @@ actor ContentService: ContentServiceProtocol {
     /// exists — the login state can change between requests.
     var jellyfinCredentialProvider: (@Sendable (Instance) async -> JellyfinCredential?)?
 
+    /// Installs the credential resolver from outside the actor (AppEnvironment
+    /// wires it after construction, once the credentials manager exists).
+    func setJellyfinCredentialProvider(_ provider: @escaping @Sendable (Instance) async -> JellyfinCredential?) {
+        jellyfinCredentialProvider = provider
+    }
+
     /// Credentials manager for fetching basic auth headers on demand.
     private let basicAuthCredentialsManager: BasicAuthCredentialsManager?
 

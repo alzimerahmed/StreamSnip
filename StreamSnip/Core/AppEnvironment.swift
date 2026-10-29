@@ -228,8 +228,10 @@ final class AppEnvironment {
 
         // Jellyfin item endpoints resolve their token at call time, so a
         // sign-in or sign-out is picked up by the next request.
-        contentSvc.jellyfinCredentialProvider = { [weak jellyfinCreds] instance in
-            await jellyfinCreds?.jellyfinCredential(for: instance)
+        Task {
+            await contentSvc.setJellyfinCredentialProvider { [weak jellyfinCreds] instance in
+                await jellyfinCreds?.jellyfinCredential(for: instance)
+            }
         }
 
         // Accounts share the credential identity namespace: the account list and
