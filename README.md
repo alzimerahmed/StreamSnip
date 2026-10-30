@@ -56,7 +56,7 @@ StreamSnipTests/          # Swift Testing suite (macOS-hosted)
 
 ## Download
 
-Grab the unsigned macOS build from [GitHub Releases](https://github.com/alzimerahmed/StreamSnip/releases). On first launch, right-click the app and choose **Open**, or allow it in System Settings → Privacy & Security.
+Grab the unsigned builds from [GitHub Releases](https://github.com/alzimerahmed/StreamSnip/releases): a macOS `.zip` (right-click the app and choose **Open** on first launch, or allow it in System Settings → Privacy & Security) and an iOS `.ipa` (sideload via AltStore/Sideloadly, or re-sign with your own certificate).
 
 ## Building
 
