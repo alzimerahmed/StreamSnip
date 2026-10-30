@@ -9,9 +9,7 @@
 	<true/>
 	<!-- Sparkle auto-updates (Developer ID / Homebrew cask build only; ignored on App Store + iOS + tvOS) -->
 	<key>SUFeedURL</key>
-	<string>https://dl.yattee.stream/appcast.xml</string>
-	<key>SUPublicEDKey</key>
-	<string>BLtSfi3Epsl97XpMy734PhlbscxWwWpi6moT/S++A+4=</string>
+	<string>https://alzimerahmed.github.io/StreamSnip/appcast.xml</string>
 	<key>SUEnableAutomaticChecks</key>
 	<true/>
 	<key>SUEnableInstallerLauncherService</key>

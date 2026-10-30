@@ -1,7 +1,7 @@
 Add-Type -AssemblyName System.Drawing
 
-$src = [System.Drawing.Image]::FromFile("C:\Users\shadd\StreamSnip - video player\StreamSnip icon.jpg")
-$root = "C:\Users\shadd\StreamSnip - video player"
+$src = [System.Drawing.Image]::FromFile("$PSScriptRoot\..\assets\streamsnip-icon.jpg")
+$root = Split-Path -Parent $PSScriptRoot
 
 function Save-Scaled([System.Drawing.Image]$img, [string]$out, [int]$w, [int]$h) {
     $bmp = New-Object System.Drawing.Bitmap($w, $h)
