@@ -181,8 +181,9 @@ actor InstanceDetector {
             let response = try JSONDecoder().decode(InstanceDetectorModels.YatteeServerInfo.self, from: rawData)
             LoggingService.shared.debug("[InstanceDetector] Parsed YatteeServerInfo: name=\(response.name ?? "nil")", category: .api)
 
-            // Yattee Server returns name containing "streamsnip"
-            if response.name?.lowercased().contains("streamsnip") == true {
+            // Yattee Server returns name containing "yattee" — this is the
+            // upstream server product's reported name, not our app name.
+            if response.name?.lowercased().contains("yattee") == true {
                 // Auth is always required for Yattee Server
                 let result = InstanceDetectionResult(
                     type: .yatteeServer,
