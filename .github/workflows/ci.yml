@@ -56,8 +56,8 @@ jobs:
           -skip-testing:StreamSnipTests/CredentialIdentityScopeTests
           -skip-testing:StreamSnipTests/CredentialReplacementTests
           -skip-testing:StreamSnipTests/LegacyCredentialAdoptionTests
-          -skip-testing:'StreamSnipTests/AccountsManagerTests/unreachableStatusExpires'
-          -skip-testing:'StreamSnipTests/RemotePlaylistsCacheTests/generationFenceDropsStaleResults'
+          -skip-testing:'StreamSnipTests/AccountsManagerTests/unreachableStatusExpires()'
+          -skip-testing:'StreamSnipTests/RemotePlaylistsCacheTests/generationFenceDropsStaleResults()'
           -resultBundlePath TestResults.xcresult
           ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon
           CODE_SIGNING_ALLOWED=NO
