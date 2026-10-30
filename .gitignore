@@ -124,3 +124,4 @@ spec/ui_snapshots/diff/
 *.xcuserstate
 skills-lock.json
 .switchboard/
+.playwright-mcp/
