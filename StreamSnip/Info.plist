@@ -57,49 +57,5 @@
 		<string>remote-notification</string>
 		<string>fetch</string>
 	</array>
-	<key>CFBundleIcons</key>
-	<dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>StreamSnipClassic</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>StreamSnipClassic60</string>
-				</array>
-			</dict>
-			<key>StreamSnipMascot</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>StreamSnipMascot60</string>
-				</array>
-			</dict>
-		</dict>
-	</dict>
-	<key>CFBundleIcons~ipad</key>
-	<dict>
-		<key>CFBundleAlternateIcons</key>
-		<dict>
-			<key>StreamSnipClassic</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>StreamSnipClassic60</string>
-					<string>StreamSnipClassic76</string>
-					<string>StreamSnipClassic83.5</string>
-				</array>
-			</dict>
-			<key>StreamSnipMascot</key>
-			<dict>
-				<key>CFBundleIconFiles</key>
-				<array>
-					<string>StreamSnipMascot60</string>
-					<string>StreamSnipMascot76</string>
-					<string>StreamSnipMascot83.5</string>
-				</array>
-			</dict>
-		</dict>
-	</dict>
 </dict>
 </plist>

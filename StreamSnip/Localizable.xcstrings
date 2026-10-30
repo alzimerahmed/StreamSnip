@@ -12221,46 +12221,6 @@
         }
       }
     },
-    "settings.appearance.appIcon.classic" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "StreamSnip Classic"
-          }
-        }
-      }
-    },
-    "settings.appearance.appIcon.default" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "StreamSnip"
-          }
-        }
-      }
-    },
-    "settings.appearance.appIcon.header" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "App Icon"
-          }
-        }
-      }
-    },
-    "settings.appearance.appIcon.mascot" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "StreamSnip Mascot"
-          }
-        }
-      }
-    },
     "settings.appearance.home.customize" : {
       "comment" : "Customize library button in appearance settings",
       "localizations" : {

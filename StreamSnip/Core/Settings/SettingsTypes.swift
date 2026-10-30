@@ -85,43 +85,6 @@ enum AccentColor: String, CaseIterable, Codable {
     }
 }
 
-enum AppIcon: String, CaseIterable, Codable {
-    case `default`
-    case classic
-    case mascot
-
-    var alternateIconName: String? {
-        switch self {
-        case .default: return nil
-        case .classic: return "StreamSnipClassic"
-        case .mascot: return "StreamSnipMascot"
-        }
-    }
-
-    var previewImageName: String {
-        switch self {
-        case .default: return "AppIconPreview"
-        case .classic: return "AppIconPreviewClassic"
-        case .mascot: return "AppIconPreviewMascot"
-        }
-    }
-
-    var displayName: String {
-        switch self {
-        case .default: return String(localized: "settings.appearance.appIcon.default")
-        case .classic: return String(localized: "settings.appearance.appIcon.classic")
-        case .mascot: return String(localized: "settings.appearance.appIcon.mascot")
-        }
-    }
-
-    var author: String? {
-        switch self {
-        case .mascot: return "by Carolus Vitalis"
-        default: return nil
-        }
-    }
-}
-
 // MARK: - Video Quality
 
 /// Playback quality preference.

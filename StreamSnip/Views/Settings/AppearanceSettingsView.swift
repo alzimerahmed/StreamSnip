@@ -6,9 +6,6 @@
 //
 
 import SwiftUI
-#if os(macOS)
-import AppKit
-#endif
 
 struct AppearanceSettingsView: View {
     @Environment(\.appEnvironment) private var appEnvironment
@@ -19,11 +16,6 @@ struct AppearanceSettingsView: View {
                 // Theme section
                 #if !os(tvOS)
                 ThemeSection(settings: settings)
-                #endif
-
-                // App icon section
-                #if !os(tvOS)
-                AppIconSection(settings: settings)
                 #endif
 
                 // Accent color section
@@ -68,78 +60,6 @@ private struct ThemeSection: View {
         }
     }
 }
-
-// MARK: - App Icon Section
-
-#if !os(tvOS)
-private struct AppIconSection: View {
-    @Bindable var settings: SettingsManager
-
-    var body: some View {
-        SettingsFormSection("settings.appearance.appIcon.header") {
-            NavigationLink {
-                AppIconPickerView(settings: settings)
-            } label: {
-                HStack {
-                    Image(settings.appIcon.previewImageName)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 44, height: 44)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-
-                    Text(settings.appIcon.displayName)
-                }
-            }
-        }
-    }
-}
-
-private struct AppIconPickerView: View {
-    @Bindable var settings: SettingsManager
-
-    var body: some View {
-        List {
-            ForEach(AppIcon.allCases, id: \.self) { appIcon in
-                Button {
-                    settings.appIcon = appIcon
-                } label: {
-                    HStack {
-                        Image(appIcon.previewImageName)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 60, height: 60)
-                            .clipShape(RoundedRectangle(cornerRadius: 13.5))
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(appIcon.displayName)
-                                .foregroundStyle(.primary)
-
-                            if let author = appIcon.author {
-                                Text(author)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Spacer()
-
-                        if settings.appIcon == appIcon {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .navigationTitle(String(localized: "settings.appearance.appIcon.header"))
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        #endif
-    }
-}
-#endif
 
 // MARK: - Accent Color Section
 
