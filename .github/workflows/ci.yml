@@ -22,15 +22,6 @@ jobs:
       - name: Resolve package dependencies
         run: xcodebuild -resolvePackageDependencies
 
-      # Apple actool regression (FB20183399): compiling an Icon Composer .icon
-      # for macOS crashes AssetCatalogAgent on Xcode <= 26.3. The tvOS job
-      # still compiles StreamSnip.icon, so coverage is kept; drop it here and
-      # fall back to the legacy AppIcon.appiconset until runners ship 26.4.1.
-      - name: Work around actool .icon crash (FB20183399)
-        run: |
-          rm -rf StreamSnip.icon
-          sed -i.bak '/StreamSnip\.icon/d' StreamSnip.xcodeproj/project.pbxproj
-
       - name: Build for testing
         run: >
           xcodebuild -project StreamSnip.xcodeproj

@@ -12,7 +12,6 @@
 		37767AB52F05766100D248FC /* NukeUI in Frameworks */ = {isa = PBXBuildFile; productRef = 37767AB42F05766100D248FC /* NukeUI */; };
 		378CF2FE2EF21767002C1CD7 /* MPVKit-GPL in Frameworks */ = {isa = PBXBuildFile; productRef = 378CF2FD2EF21767002C1CD7 /* MPVKit-GPL */; };
 		378CF3012EF21783002C1CD7 /* MPVKit-GPL in Frameworks */ = {isa = PBXBuildFile; productRef = 378CF3002EF21783002C1CD7 /* MPVKit-GPL */; };
-		37BA19A62EE4DFEE001D7B0F /* StreamSnip.icon in Resources */ = {isa = PBXBuildFile; fileRef = 37BA19A52EE4DFEE001D7B0F /* StreamSnip.icon */; };
 		37BA19B52EE4EB7F001D7B0F /* StreamSnipShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 37BA19AB2EE4EB7F001D7B0F /* StreamSnipShareExtension.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		37C0AAAA00000000AAAA000C /* StreamSnipTopShelf.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 37C0AAAA00000000AAAA0002 /* StreamSnipTopShelf.appex */; platformFilters = (tvos, ); settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -58,7 +57,6 @@
 
 /* Begin PBXFileReference section */
 		372D1A272EDB163800F58F7A /* StreamSnip.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = StreamSnip.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		37BA19A52EE4DFEE001D7B0F /* StreamSnip.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = StreamSnip.icon; sourceTree = "<group>"; };
 		37BA19AB2EE4EB7F001D7B0F /* StreamSnipShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StreamSnipShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		37C0AAAA00000000AAAA0002 /* StreamSnipTopShelf.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = StreamSnipTopShelf.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		37D0B2942EDB23BD00B9C4ED /* StreamSnipTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = StreamSnipTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -166,7 +164,6 @@
 				37BA19AC2EE4EB7F001D7B0F /* StreamSnipShareExtension */,
 				37C0AAAA00000000AAAA0003 /* StreamSnipTopShelf */,
 				372D1A282EDB163800F58F7A /* Products */,
-				37BA19A52EE4DFEE001D7B0F /* StreamSnip.icon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -339,7 +336,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				37BA19A62EE4DFEE001D7B0F /* StreamSnip.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -632,7 +628,7 @@
 		372D1A332EDB163900F58F7A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = StreamSnip;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = StreamSnip/StreamSnip.entitlements;
@@ -688,7 +684,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -717,7 +713,7 @@
 		37CCD0E00000000000000002 /* Debug-CKDev */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = StreamSnip;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = StreamSnip/StreamSnip.entitlements;
@@ -773,7 +769,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -802,7 +798,7 @@
 		372D1A342EDB163900F58F7A /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = StreamSnip;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = StreamSnip/StreamSnip.entitlements;
@@ -857,7 +853,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				"OTHER_LDFLAGS[sdk=macosx*]" = (
 					"$(inherited)",
 					"-Wl,-dead_strip_dylibs",
@@ -947,7 +943,7 @@
 		376D70462F996E0700255B09 /* Release-DeveloperID */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = StreamSnip;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				AUTOMATION_APPLE_EVENTS = NO;
 				CODE_SIGN_ENTITLEMENTS = StreamSnip/StreamSnip.entitlements;
@@ -1002,7 +998,7 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -1075,7 +1071,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1107,7 +1103,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = appletvos;
@@ -1142,7 +1138,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1173,7 +1169,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1204,7 +1200,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
@@ -1236,7 +1232,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = appletvos;
@@ -1270,7 +1266,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = appletvos;
@@ -1304,7 +1300,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 2.0.0;
+				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.alzimerahmed.StreamSnip.TopShelf;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = appletvos;
