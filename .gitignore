@@ -123,3 +123,4 @@ spec/ui_snapshots/diff/
 .DS_Store
 *.xcuserstate
 skills-lock.json
+.switchboard/
